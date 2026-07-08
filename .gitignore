@@ -1,0 +1,36 @@
+# Python environments and caches
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Build outputs
+build/
+dist/
+*.egg-info/
+
+# Local Curator/Agentctl runtime state
+.curator/
+.agentctl/
+*.sqlite
+*.sqlite3
+
+# Node tooling
+node_modules/
+
+# OS/editor files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local worktrees and temporary artifacts
+.worktrees/
+worktrees/
+.tmp/
+tmp/
