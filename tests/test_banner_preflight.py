@@ -6,7 +6,13 @@ import sys
 
 from curator.app import start_goal_loop
 from curator.core.paths import build_curator_paths
-from curator.diagnostics.preflight import render_preflight, run_preflight
+from curator.diagnostics import preflight as preflight_module
+from curator.diagnostics.preflight import (
+    _auth_state,
+    _macos_keychain_has,
+    render_preflight,
+    run_preflight,
+)
 from curator.goals.store import accept_goal, propose_goal, save_goal
 from curator.shell.banner import git_branch, render_banner
 from fakes import enable_live_mode, install_fake_claude
@@ -147,6 +153,7 @@ def test_preflight_marks_unknown_login_state_as_warning(tmp_path, monkeypatch):
     """Verify missing credential markers degrade to a warning, not a failure."""
     monkeypatch.setenv("PATH", _fake_provider_bin(tmp_path))
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(preflight_module, "_macos_keychain_has", lambda _service: False)
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
@@ -155,6 +162,104 @@ def test_preflight_marks_unknown_login_state_as_warning(tmp_path, monkeypatch):
 
     assert check.status == "warn"
     assert "login" in check.detail
+
+
+def test_auth_state_reads_claude_login_from_macos_keychain(tmp_path, monkeypatch):
+    """Verify claude login is detected from the macOS keychain entry."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    seen = {}
+
+    def fake_keychain(service: str) -> bool:
+        seen["service"] = service
+        return True
+
+    monkeypatch.setattr(preflight_module, "_macos_keychain_has", fake_keychain)
+
+    authed, detail = _auth_state("claude-code")
+
+    assert authed is True
+    assert "keychain" in detail
+    assert seen["service"] == "Claude Code-credentials"
+
+
+def test_auth_state_stays_unknown_when_keychain_misses(tmp_path, monkeypatch):
+    """Verify a keychain miss with no file or env still degrades to unknown."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(preflight_module, "_macos_keychain_has", lambda _service: False)
+
+    authed, detail = _auth_state("claude-code")
+
+    assert authed is False
+    assert "unknown" in detail
+
+
+def test_auth_state_does_not_consult_keychain_for_codex(tmp_path, monkeypatch):
+    """Verify the keychain heuristic is claude-only, not used for codex."""
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+
+    def fail_if_called(_service: str) -> bool:
+        raise AssertionError("keychain must not be consulted for codex")
+
+    monkeypatch.setattr(preflight_module, "_macos_keychain_has", fail_if_called)
+
+    authed, detail = _auth_state("codex")
+
+    assert authed is False
+    assert "unknown" in detail
+
+
+def test_macos_keychain_lookup_skipped_off_darwin(monkeypatch):
+    """Verify the keychain lookup is a no-op on non-macOS platforms."""
+    monkeypatch.setattr(preflight_module.sys, "platform", "linux")
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("security must not run off darwin")
+
+    monkeypatch.setattr(preflight_module.subprocess, "run", fail_if_called)
+
+    assert _macos_keychain_has("Claude Code-credentials") is False
+
+
+def test_macos_keychain_lookup_invokes_security_command(monkeypatch):
+    """Verify the darwin lookup shells out to `security` and maps exit codes."""
+    monkeypatch.setattr(preflight_module.sys, "platform", "darwin")
+    calls = []
+
+    class _Completed:
+        def __init__(self, returncode):
+            self.returncode = returncode
+
+    def fake_run(argv, **_kwargs):
+        calls.append(argv)
+        return _Completed(0 if "Claude Code-credentials" in argv else 1)
+
+    monkeypatch.setattr(preflight_module.subprocess, "run", fake_run)
+
+    assert _macos_keychain_has("Claude Code-credentials") is True
+    assert _macos_keychain_has("nonexistent-service") is False
+    assert calls[0][0] == "security"
+    assert "find-generic-password" in calls[0]
+
+
+def test_macos_keychain_lookup_survives_security_failure(monkeypatch):
+    """Verify a missing or erroring `security` binary degrades to False."""
+    monkeypatch.setattr(preflight_module.sys, "platform", "darwin")
+
+    def raise_oserror(*_args, **_kwargs):
+        raise OSError("security not found")
+
+    monkeypatch.setattr(preflight_module.subprocess, "run", raise_oserror)
+
+    assert _macos_keychain_has("Claude Code-credentials") is False
 
 
 def test_preflight_warns_when_no_verification_commands_exist(tmp_path):

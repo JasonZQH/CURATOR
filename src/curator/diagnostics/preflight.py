@@ -96,6 +96,26 @@ def _git_check(project_root: Path) -> PreflightCheck:
     return PreflightCheck(key="git", status="ok", detail="git working tree clean")
 
 
+def _macos_keychain_has(service: str) -> bool:
+    """Return whether the macOS keychain holds a credential for `service`.
+
+    Read-only existence check (no `-w`), so it never decrypts the secret
+    or triggers a keychain access prompt. A no-op off macOS.
+    """
+    if sys.platform != "darwin":
+        return False
+    try:
+        result = subprocess.run(
+            ["security", "find-generic-password", "-s", service],
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0
+
+
 def _auth_state(provider_key: str) -> tuple[bool, str]:
     """Return (authenticated, detail) from local credential heuristics."""
     home = Path.home()
@@ -104,6 +124,10 @@ def _auth_state(provider_key: str) -> tuple[bool, str]:
             return True, "logged in (API key in environment)"
         if (home / ".claude" / ".credentials.json").exists():
             return True, "logged in"
+        # Claude Code stores its OAuth token in the macOS keychain rather
+        # than a plaintext credentials file, so check there before warning.
+        if _macos_keychain_has("Claude Code-credentials"):
+            return True, "logged in (keychain)"
         return False, "login state unknown"
     if os.environ.get("OPENAI_API_KEY"):
         return True, "logged in (API key in environment)"
