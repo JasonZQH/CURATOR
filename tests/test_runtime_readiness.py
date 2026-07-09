@@ -17,7 +17,7 @@ from curator.providers.contracts import (
     ProviderRunResponse,
     ScopeChangeSignal,
 )
-from fakes import CodingDeliveryFakeProvider
+from fakes import CodingDeliveryFakeProvider, enable_live_mode, install_fake_claude
 from curator.runtime.action_policy import ActionPolicy, ActionRequest, ActionType
 from curator.scheduler.snapshots import load_latest_workflow_snapshot
 from curator.shell.repl import ShellState, handle_shell_input
@@ -59,6 +59,7 @@ def _accepted_goal_revision(project_root: Path, text: str = "Fix mobile login la
 
 def test_shell_recovers_goal_draft_and_history_from_sqlite(tmp_path):
     """Verify PM discovery discussion survives shell restart before goal acceptance."""
+    enable_live_mode(tmp_path)
     first_state = ShellState(project_root=tmp_path, gate_mode=True)
 
     draft_response = handle_shell_input(first_state, "Fix mobile login layout")
@@ -82,8 +83,10 @@ def test_shell_recovers_goal_draft_and_history_from_sqlite(tmp_path):
     assert draft.contract["summary"] == "Fix mobile login layout"
 
 
-def test_goal_current_prefers_accepted_revision_after_loop_start(tmp_path):
+def test_goal_current_prefers_accepted_revision_after_loop_start(tmp_path, monkeypatch):
     """Verify accepted goals take precedence over stale draft recovery."""
+    enable_live_mode(tmp_path)
+    install_fake_claude(tmp_path, monkeypatch)
     state = ShellState(project_root=tmp_path, gate_mode=True)
 
     handle_shell_input(state, "Fix mobile login layout")
@@ -95,15 +98,20 @@ def test_goal_current_prefers_accepted_revision_after_loop_start(tmp_path):
     assert "Draft goal:" not in recovered_goal.text
 
 
-def test_shell_accepts_recovered_goal_draft_after_restart(tmp_path):
-    """Verify yes accepts the latest SQLite draft without ShellState cache."""
+def test_shell_accepts_recovered_goal_draft_after_restart(tmp_path, monkeypatch):
+    """Verify /goal start accepts the latest SQLite draft without ShellState cache."""
+    enable_live_mode(tmp_path)
+    install_fake_claude(tmp_path, monkeypatch)
     handle_shell_input(
         ShellState(project_root=tmp_path, gate_mode=True), "Fix mobile login layout"
     )
 
-    accepted = handle_shell_input(ShellState(project_root=tmp_path), "yes")
+    guided = handle_shell_input(ShellState(project_root=tmp_path), "yes")
+    accepted = handle_shell_input(ShellState(project_root=tmp_path), "/goal start")
     current = handle_shell_input(ShellState(project_root=tmp_path), "/goal current")
 
+    assert "No pending proposal" in guided.text
+    assert "/goal start" in guided.text
     assert "Goal accepted:" in accepted.text
     assert "Accepted goal:" in current.text
     assert "goal-fix-mobile-login-layout-rev-001" in current.text

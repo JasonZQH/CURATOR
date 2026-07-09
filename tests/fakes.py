@@ -70,3 +70,65 @@ class CodingDeliveryFakeProvider:
             "CodingDeliveryFakeProvider cannot run role and step pair: "
             f"{spec.role.value}/{spec.step_type.value}"
         )
+
+
+def enable_live_mode(project_root) -> None:
+    """Initialize state and bind a claude-code profile to both slots."""
+    from curator.app import write_init_state
+    from curator.core.enums import ProviderBindingStatus, ProviderProfileStatus
+    from curator.core.paths import build_curator_paths
+    from curator.core.schema import ProviderProfileRecord, RoleProviderBindingRecord
+    from curator.state.db import connect_database, initialize_database
+    from curator.state.repositories import (
+        insert_provider_profile,
+        insert_role_provider_binding,
+    )
+
+    write_init_state(project_root)
+    now = datetime.now(UTC)
+    connection = connect_database(build_curator_paths(project_root).database)
+    try:
+        initialize_database(connection)
+        insert_provider_profile(
+            connection,
+            ProviderProfileRecord(
+                id="claude-code",
+                provider=ProviderName.CLAUDE_CODE,
+                label="claude-code (local CLI)",
+                credential_ref="local-cli",
+                status=ProviderProfileStatus.ACTIVE,
+                created_at=now,
+                updated_at=now,
+                metadata={"binary": "claude", "version": "test"},
+            ),
+        )
+        for role_instance_id in ("writer.default", "reviewer.default"):
+            insert_role_provider_binding(
+                connection,
+                RoleProviderBindingRecord(
+                    id=f"binding-{role_instance_id}-claude-code",
+                    role_instance_id=role_instance_id,
+                    provider_profile_id="claude-code",
+                    status=ProviderBindingStatus.ACTIVE,
+                    created_at=now,
+                    updated_at=now,
+                ),
+            )
+    finally:
+        connection.close()
+
+
+def install_fake_claude(tmp_path, monkeypatch) -> None:
+    """Put a scripted `claude` binary first on PATH for loop dispatch."""
+    import os
+
+    bin_dir = tmp_path / "fakebin"
+    bin_dir.mkdir(exist_ok=True)
+    script = bin_dir / "claude"
+    script.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json\n"
+        'print(json.dumps({"type": "result", "result": "done"}))\n'
+    )
+    script.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")

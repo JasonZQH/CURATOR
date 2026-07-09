@@ -95,9 +95,9 @@ def main(
         help="Print workflow output instead of launching the TUI.",
     ),
     gate: bool = typer.Option(
-        False,
-        "--gate",
-        help="Require proposal review before every request runs.",
+        True,
+        "--gate/--no-gate",
+        help="Require proposal review before every request runs (default: on).",
     ),
 ) -> None:
     """Start the Curator CLI shell for the current project."""
@@ -217,7 +217,10 @@ def provider_add_command(
     if not result.created:
         raise typer.Exit(1)
     assert result.profile is not None
-    typer.echo("Next: bind a slot with /agent bind writer.default " + result.profile.id)
+    typer.echo(
+        "Next: run `curator`, then bind a slot with: /agent bind writer.default "
+        + result.profile.id
+    )
 
 
 @provider_app.command("list")

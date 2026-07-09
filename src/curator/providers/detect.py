@@ -36,6 +36,12 @@ def detect_available_providers(project_root: Path | str | None = None) -> list[P
     return providers
 
 
-def provider_setup_hint() -> str:
-    """Return the single guidance string for connecting a real provider."""
-    return "curator provider add claude-code — connect Claude Code or Codex"
+def provider_setup_hint(surface: str = "shell") -> str:
+    """Return the guidance string for connecting a real provider.
+
+    `surface` selects the command dialect: "shell" for text shown inside
+    the Curator shell (slash commands), "terminal" for OS-terminal output.
+    """
+    if surface == "terminal":
+        return "curator provider add claude-code — connect Claude Code or Codex"
+    return "/provider add claude-code — connect Claude Code or Codex"
