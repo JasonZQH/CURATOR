@@ -61,7 +61,7 @@ def _next_action(project_root: Path | str, mode: RuntimeMode) -> str:
     return "Type what you want to work on."
 
 
-def _open_pause_exists(project_root: Path | str) -> bool:
+def open_pause_exists(project_root: Path | str) -> bool:
     """Return whether an open pause survives from an earlier session."""
     paths = build_curator_paths(project_root)
     if not paths.database.exists():
@@ -87,7 +87,7 @@ def build_welcome_text(project_root: Path | str) -> str:
         f"Mode: {mode.label} ({mode.detail})",
         f"Next: {_next_action(project_root, mode)}",
     ]
-    if _open_pause_exists(project_root):
+    if open_pause_exists(project_root):
         lines.append(
             "A loop is paused — /resume <answer>, /revise <new scope>, or /cancel."
         )

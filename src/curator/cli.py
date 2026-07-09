@@ -85,16 +85,10 @@ def main(
         is_eager=True,
         help="Show the Curator version and exit.",
     ),
-    yes: bool = typer.Option(
-        False,
-        "--yes",
-        "-y",
-        help="Approve non-interactive setup for top-level workflows.",
-    ),
     no_tui: bool = typer.Option(
         False,
         "--no-tui",
-        help="Print workflow output instead of launching the TUI.",
+        help="Use the plain line shell instead of the full-screen app.",
     ),
     gate: bool = typer.Option(
         True,
@@ -104,11 +98,17 @@ def main(
 ) -> None:
     """Start the Curator CLI shell for the current project."""
     _ = version
-    _ = yes
-    _ = no_tui
 
-    if context.invoked_subcommand is None:
+    if context.invoked_subcommand is not None:
+        return
+    import sys
+
+    if no_tui or not sys.stdin.isatty() or not sys.stdout.isatty():
         run_interactive_shell(Path.cwd(), gate=gate)
+        return
+    from curator.tui.shell_app import run_shell_app
+
+    run_shell_app(Path.cwd(), gate=gate)
 
 
 @app.command("init")
