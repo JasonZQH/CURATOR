@@ -3,6 +3,7 @@
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Callable
 
 from curator.app import (
     resume_goal_loop,
@@ -102,6 +103,7 @@ class ShellState:
     latest_snapshot: WorkflowSnapshot | None = None
     should_exit: bool = False
     gate_mode: bool = True
+    emit_event: Callable[[ProviderEvent], None] | None = None
 
 
 @dataclass(frozen=True)
@@ -811,11 +813,22 @@ def _handle_slash_command(state: ShellState, text: str) -> ShellResponse:
     return ShellResponse(_unknown_command_text(text))
 
 
-_KNOWN_SLASH_ROOTS = (
+KNOWN_SLASH_ROOTS = (
     "/help", "/quit", "/init", "/setup", "/status", "/doctor", "/validate", "/node", "/goal",
     "/history", "/session", "/workbench", "/agents", "/providers",
     "/provider", "/agent", "/queue", "/approvals", "/approve", "/reject",
     "/evidence", "/memory", "/resume", "/revise", "/gate", "/cancel",
+)
+
+# Full command phrases used for interactive completion suggestions.
+KNOWN_SLASH_COMMANDS = (
+    "/help", "/help all", "/setup", "/init", "/status", "/doctor", "/validate",
+    "/goal current", "/goal start", "/goal history", "/node list", "/node current",
+    "/resume", "/revise", "/gate on", "/gate off", "/cancel", "/history",
+    "/session current", "/workbench", "/agents", "/providers",
+    "/provider add claude-code", "/provider add codex", "/agent status",
+    "/agent bind", "/agent switch", "/queue", "/queue tick", "/approvals",
+    "/approve", "/reject", "/evidence", "/memory", "/quit",
 )
 
 
@@ -824,7 +837,7 @@ def _unknown_command_text(text: str) -> str:
     from difflib import get_close_matches
 
     first = text.split()[0]
-    matches = get_close_matches(first, _KNOWN_SLASH_ROOTS, n=1, cutoff=0.6)
+    matches = get_close_matches(first, KNOWN_SLASH_ROOTS, n=1, cutoff=0.6)
     if not matches:
         return f"Unknown command: {text}\nType /help for commands."
     return f"Unknown command: {text}\nDid you mean {matches[0]}? (/help for all commands)"
@@ -902,7 +915,9 @@ def _start_accepted_goal(state: ShellState, auto: bool = False) -> ShellResponse
     acceptance = accept_goal(paths, state.pending_goal.id)
     try:
         snapshot = start_goal_loop(
-            state.project_root, acceptance.revision_id, on_event=_print_progress_event
+            state.project_root,
+            acceptance.revision_id,
+            on_event=state.emit_event or _print_progress_event,
         )
     except KeyboardInterrupt:
         state.pending_goal = None
