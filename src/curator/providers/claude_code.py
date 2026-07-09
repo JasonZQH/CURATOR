@@ -17,8 +17,6 @@ from curator.providers.events import ProviderEvent, ProviderEventKind
 from curator.runtime.action_policy import ActionPolicy
 from curator.runtime.permissions import claude_permission_args
 
-DEFAULT_MAX_TURNS = 30
-
 
 class ClaudeCodeDriver(SubprocessDriver):
     """Run `claude -p` in stream-json mode behind the async driver protocol."""
@@ -48,8 +46,6 @@ class ClaudeCodeDriver(SubprocessDriver):
             "stream-json",
             "--verbose",
             "--include-partial-messages",
-            "--max-turns",
-            str(DEFAULT_MAX_TURNS),
             *claude_permission_args(policy, self.slot),
         ]
 

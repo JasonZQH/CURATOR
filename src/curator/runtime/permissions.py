@@ -11,9 +11,13 @@ from curator.runtime.action_policy import ActionPolicy
 WRITER_SLOT = "writer"
 REVIEWER_SLOT = "reviewer"
 
-_CLAUDE_WRITER_TOOLS = "Edit Write Read Grep Glob Bash(uv run pytest*) Bash(git *)"
-_CLAUDE_READER_TOOLS = "Read Grep Glob"
-_CLAUDE_DISALLOWED = "Bash(git push*) WebFetch"
+# Claude Code's --allowedTools/--disallowedTools accept a comma- OR space-separated
+# list. Tool specs like "Bash(git *)" contain a space, so the value MUST be
+# comma-separated (each whole spec is passed as one argv element) or the space
+# would split one spec into broken tokens.
+_CLAUDE_WRITER_TOOLS = "Edit,Write,Read,Grep,Glob,Bash(uv run pytest*),Bash(git *)"
+_CLAUDE_READER_TOOLS = "Read,Grep,Glob"
+_CLAUDE_DISALLOWED = "Bash(git push*),WebFetch"
 
 
 def _is_reviewer(slot: str | None) -> bool:

@@ -68,6 +68,23 @@ def test_claude_permission_args_differ_by_slot(tmp_path):
     assert "Write" not in " ".join(reviewer)
 
 
+def test_claude_tool_lists_are_comma_separated_single_args(tmp_path):
+    """Verify tool specs with spaces stay intact as one comma-separated argv value.
+
+    Claude's --allowedTools splits on spaces, so "Bash(git *)" must ride inside a
+    single comma-separated argument, never split across argv elements.
+    """
+    policy = ActionPolicy.for_project(tmp_path)
+    writer = claude_permission_args(policy, "writer")
+    tools_value = writer[writer.index("--allowedTools") + 1]
+
+    assert "," in tools_value
+    assert "Bash(git *)" in tools_value.split(",")
+    # The spec must never appear as its own broken argv token.
+    assert "Bash(git" not in writer
+    assert "*)" not in writer
+
+
 def test_codex_sandbox_args_differ_by_slot(tmp_path):
     """Verify writer slots get workspace-write and reviewers read-only."""
     policy = ActionPolicy.for_project(tmp_path)
@@ -84,6 +101,8 @@ def test_claude_driver_build_argv_includes_stream_json(tmp_path):
     assert argv[0] == "claude"
     assert "--output-format" in argv
     assert "stream-json" in argv
+    # --max-turns is not a valid Claude Code flag; it must not be emitted.
+    assert "--max-turns" not in argv
 
 
 def test_context_package_request_reaches_cli_prompts(tmp_path):
