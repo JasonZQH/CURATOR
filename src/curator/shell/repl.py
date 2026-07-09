@@ -7,7 +7,6 @@ from pathlib import Path
 from curator.app import (
     resume_goal_loop,
     start_goal_loop,
-    write_init_state,
 )
 from curator.core.enums import (
     ApprovalKind,
@@ -59,6 +58,7 @@ from curator.providers.events import ProviderEvent, ProviderEventKind
 from curator.providers.setup import add_provider_profile
 from curator.scheduler.snapshots import load_latest_workflow_snapshot
 from curator.shell.intent import detect_cli_command, render_command_hint
+from curator.shell.wizard import run_setup_wizard
 from curator.shell.onboarding import (
     apply_first_run_init,
     build_welcome_text,
@@ -166,6 +166,7 @@ def _help_text(full: bool = False) -> str:
                 "Curator commands:",
                 "- /help: show task-oriented help",
                 "- /help all: show this full command list",
+                "- /setup: guided setup (roles → providers → login)",
                 "- /goal current: show current draft or accepted goal",
                 "- /goal start: accept and start the saved draft goal",
                 "- /goal history: show goal and discovery history",
@@ -219,6 +220,7 @@ def _help_text(full: bool = False) -> str:
             "- /approvals, /approve <id>, /reject <id> — scoped approvals",
             "",
             "Configure providers:",
+            "- /setup — guided setup (roles → providers → login)",
             "- /provider add claude-code|codex — connect a local provider CLI",
             "- /providers — provider profiles, quota, bindings",
             "- /agents, /agent status <agent> — role pool state",
@@ -545,7 +547,11 @@ def _handle_provider_add(state: ShellState, text: str) -> ShellResponse:
     parts = text.split()
     if len(parts) != 3:
         return ShellResponse("Usage: /provider add <claude-code|codex>")
-    write_init_state(state.project_root)
+    if not _database_exists(state):
+        return ShellResponse(
+            "Curator is not initialized here.\n"
+            "Run /setup for guided setup, or /init to create state first."
+        )
     connection = _connect_state(state)
     try:
         result = add_provider_profile(connection, parts[2])
@@ -740,6 +746,8 @@ def _handle_slash_command(state: ShellState, text: str) -> ShellResponse:
         return ShellResponse("Bye.", should_exit=True)
     if text == "/init":
         return ShellResponse(apply_first_run_init(state.project_root))
+    if text == "/setup":
+        return ShellResponse(run_setup_wizard(state.project_root).message)
     if text == "/help":
         return ShellResponse(_help_text())
     if text == "/help all":
@@ -804,7 +812,7 @@ def _handle_slash_command(state: ShellState, text: str) -> ShellResponse:
 
 
 _KNOWN_SLASH_ROOTS = (
-    "/help", "/quit", "/init", "/status", "/doctor", "/validate", "/node", "/goal",
+    "/help", "/quit", "/init", "/setup", "/status", "/doctor", "/validate", "/node", "/goal",
     "/history", "/session", "/workbench", "/agents", "/providers",
     "/provider", "/agent", "/queue", "/approvals", "/approve", "/reject",
     "/evidence", "/memory", "/resume", "/revise", "/gate", "/cancel",
@@ -889,7 +897,6 @@ def _start_accepted_goal(state: ShellState, auto: bool = False) -> ShellResponse
         state.pending_goal,
         message="auto-accepted (fast path)" if auto else "accepted from shell yes",
     )
-    write_init_state(state.project_root)
     save_goal(paths, state.pending_goal)
     _resolve_scope_change_pause(state, state.pending_goal)
     acceptance = accept_goal(paths, state.pending_goal.id)
@@ -1127,13 +1134,12 @@ def _paused_loop_exists(state: ShellState) -> bool:
 def _setup_mode_refusal(state: ShellState, mode) -> ShellResponse:
     """Refuse to start work in setup mode without touching any state."""
     lines = [
-        f"Curator is in setup mode ({mode.detail}) — nothing was started or saved."
+        f"Curator is in setup mode ({mode.detail}) — nothing was started or saved.",
+        "- /setup — guided setup (roles → providers → login)",
+        "Or set up manually:",
     ]
     if first_run_needed(state.project_root):
-        lines.append("Set up this project first:")
         lines.append("- /init — create Curator state here")
-    else:
-        lines.append("Connect a provider first:")
     lines.extend(
         [
             "- /provider add claude-code   (or: /provider add codex)",
@@ -1203,18 +1209,18 @@ def handle_shell_input(state: ShellState, text: str) -> ShellResponse:
 
 
 def _offer_first_run_init(project_root: Path) -> None:
-    """Offer to initialize a fresh project on an interactive terminal."""
+    """Offer the setup wizard for a fresh project on an interactive terminal."""
     import sys
 
     if not first_run_needed(project_root) or not sys.stdin.isatty():
         return
     print("This project is not initialized yet.")
     try:
-        answer = input("Initialize Curator here now? [y/N] ")
+        answer = input("Run the setup wizard now? [Y/n] ")
     except EOFError:
         return
-    if answer.strip().lower() in {"y", "yes"}:
-        print(apply_first_run_init(project_root))
+    if answer.strip().lower() in {"", "y", "yes"}:
+        print(run_setup_wizard(project_root).message)
 
 
 def _should_run_preflight() -> bool:
