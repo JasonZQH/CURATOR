@@ -15,6 +15,7 @@ _MULTI_WORD_COMMANDS: dict[tuple[str, ...], str | None] = {
 # Single-word curator subcommands and their in-shell equivalents.
 _SINGLE_WORD_COMMANDS: dict[str, str | None] = {
     "init": "/init",
+    "setup": "/setup",
     "status": "/status",
     "help": "/help",
     "doctor": "/doctor",

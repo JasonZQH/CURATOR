@@ -97,6 +97,9 @@ def add_provider_profile(
         )
 
     timestamp = now or datetime.now(UTC)
+    from curator.diagnostics.preflight import provider_auth_state
+
+    authed, auth_detail = provider_auth_state(provider.value)
     profile = ProviderProfileRecord(
         id=profile_id,
         provider=provider,
@@ -108,11 +111,11 @@ def add_provider_profile(
         metadata={
             "binary": provider_binary(provider) or "unknown",
             "version": availability.version,
+            "auth": auth_detail,
         },
     )
     insert_provider_profile(connection, profile)
-    return ProviderAddResult(
-        created=True,
-        profile=profile,
-        message=f"Added provider profile {profile_id} ({availability.version}).",
-    )
+    message = f"Added provider profile {profile_id} ({availability.version})."
+    if not authed:
+        message = f"{message} Warning: {auth_detail} — runs may fail until you sign in."
+    return ProviderAddResult(created=True, profile=profile, message=message)

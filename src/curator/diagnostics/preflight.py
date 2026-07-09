@@ -157,6 +157,16 @@ def _probe_provider(provider_key: str, binary: str) -> PreflightCheck:
     )
 
 
+def probe_provider(provider_key: str) -> PreflightCheck:
+    """Probe one provider CLI by key (claude-code or codex)."""
+    return _probe_provider(provider_key, _PROVIDER_BINARIES[provider_key])
+
+
+def provider_auth_state(provider_key: str) -> tuple[bool, str]:
+    """Return (authenticated, detail) for one provider key."""
+    return _auth_state(provider_key)
+
+
 def _verification_check(project_root: Path) -> PreflightCheck:
     """Check whether the VALIDATE step will find verification commands."""
     commands = discover_verification_commands(project_root)
