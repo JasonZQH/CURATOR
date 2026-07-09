@@ -25,8 +25,10 @@ packages.json
 *.sqlite
 *.sqlite3
 
-# Node tooling
+# Node tooling (docs diagram generation only; not part of the Python package)
 node_modules/
+package.json
+package-lock.json
 
 # OS/editor files
 .DS_Store
