@@ -20,6 +20,21 @@ class InitStateResult(BaseModel):
     skipped_files: list[Path] = Field(default_factory=list)
 
 
+def _write_state_gitignore(paths) -> Path | None:
+    """Write .curator/.gitignore so a project never tracks local Curator state.
+
+    This keeps `curator init` from dirtying the target repo's working tree
+    (which would otherwise block the writer's clean-tree guard) and prevents
+    users from committing their local ledger.
+    """
+    gitignore = paths.curator_dir / ".gitignore"
+    if gitignore.exists():
+        return None
+    gitignore.parent.mkdir(parents=True, exist_ok=True)
+    gitignore.write_text("# Curator local state — do not commit.\n*\n")
+    return gitignore
+
+
 def create_curator_state(proposal: InitProposal) -> InitStateResult:
     """Create approved Curator files and initialize the SQLite database."""
     paths = proposal.paths
@@ -29,6 +44,10 @@ def create_curator_state(proposal: InitProposal) -> InitStateResult:
         *write_default_roles(paths),
         *write_default_memory(paths),
     ]
+
+    state_gitignore = _write_state_gitignore(paths)
+    if state_gitignore is not None:
+        created_files.append(state_gitignore)
 
     connection = connect_database(paths.database)
     try:
