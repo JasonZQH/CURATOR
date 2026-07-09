@@ -45,7 +45,11 @@ from curator.harness.verifier import (
     discover_verification_commands,
     run_verification,
 )
-from curator.harness.workspace import WorkspaceDirtyError
+from curator.harness.workspace import (
+    WorkspaceDirtyError,
+    capture_baseline,
+    require_clean_baseline,
+)
 from curator.memory.distill import record_decision_memory
 from curator.loops.compiler import compile_coding_delivery_plan
 from curator.providers.contracts import ProviderRunRequest, classify_provider_error
@@ -572,6 +576,17 @@ def _execute_human_gate_step(
     )
 
 
+def _has_implementation_evidence(state: LoopExecutionState) -> bool:
+    """Return whether a writer has already produced evidence in this loop.
+
+    True once the loop owns the workspace (across retries and resumes), so the
+    clean-tree guard is skipped for subsequent writer dispatches.
+    """
+    return any(
+        evidence.kind is EvidenceKind.IMPLEMENTATION for evidence in state.evidence_refs
+    )
+
+
 def _verification_commands(
     state: LoopExecutionState, step: CompiledLoopStep, project_root: Path
 ) -> list[list[str]]:
@@ -659,7 +674,11 @@ def _execute_verifier_step(
         runtime_decision = RuntimeDecision(
             decision=LoopDecisionType.HUMAN_HANDOFF,
             stop_condition=StopCondition.HUMAN_HANDOFF_REQUESTED,
-            reason="No verification commands configured; pausing for user input.",
+            reason=(
+                "No verification commands were found (no tests, pyproject pytest/ruff, "
+                "or package.json test/lint). Add tests or set the step's "
+                "verification_commands, then resume; Curator will not claim unverified success."
+            ),
         )
     else:
         runtime_decision = decide_runtime(step, result, role_contracts=ctx.role_contracts)
@@ -795,6 +814,11 @@ async def _execute_provider_step(
     result = None
     provider_identity = None
     try:
+        # Enforce a clean workspace only on the loop's very first writer
+        # dispatch. Retries and resumes legitimately build on the writer's own
+        # prior (uncommitted) output, so the guard must not block them.
+        if step.slot == "writer" and not _has_implementation_evidence(state):
+            require_clean_baseline(capture_baseline(ctx.session.project_root))
         driver = ctx.driver_for_step(step)
         provider_identity = driver
         insert_provider_run(

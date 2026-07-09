@@ -5,11 +5,7 @@ from pathlib import Path
 from curator.core.enums import ProviderErrorKind, ProviderName
 from curator.core.schema import HarnessRunSpec
 from curator.harness.context import render_prompt
-from curator.harness.workspace import (
-    WorkspaceBaseline,
-    capture_baseline,
-    require_clean_baseline,
-)
+from curator.harness.workspace import WorkspaceBaseline, capture_baseline
 from curator.providers.cli_common import build_cli_provider_response
 from curator.providers.contracts import ProviderRunRequest, ProviderRunResponse
 from curator.providers.driver import SubprocessDriver
@@ -32,10 +28,9 @@ class CodexCliDriver(SubprocessDriver):
 
     def build_argv(self, spec: HarnessRunSpec, request: ProviderRunRequest) -> list[str]:
         """Return the `codex exec --json` argv with policy-derived sandbox flags."""
-        baseline = capture_baseline(self.project_root)
-        if self.slot == "writer":
-            require_clean_baseline(baseline)
-        self._baselines[spec.id] = baseline
+        # The scheduler owns clean-tree enforcement (only on the loop's first
+        # writer dispatch); the driver just records the baseline for diffing.
+        self._baselines[spec.id] = capture_baseline(self.project_root)
         policy = ActionPolicy.for_project(self.project_root)
         prompt = render_prompt(request, self.slot)
         return [

@@ -162,6 +162,10 @@ class SubprocessDriver:
         process = await asyncio.create_subprocess_exec(
             *argv,
             cwd=self.project_root,
+            # Provide the prompt via argv only. Give the child an empty stdin so
+            # CLIs that opportunistically read stdin (e.g. `codex exec`) get an
+            # immediate EOF instead of blocking forever on input that never comes.
+            stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )

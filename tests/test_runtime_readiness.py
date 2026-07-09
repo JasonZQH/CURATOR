@@ -139,7 +139,7 @@ def test_paused_node_and_resume_are_durable_across_shell_restart(tmp_path):
     assert "Role: qa" in node_response.text
     assert "Verify the implementation" in node_response.text
     assert "Paused:" in node_response.text
-    assert "No verification commands configured; pausing for user input." in node_response.text
+    assert "No verification commands were found" in node_response.text
     assert "A loop is paused:" in notice_response.text
     assert "/resume" in notice_response.text
     assert "/revise" in notice_response.text
