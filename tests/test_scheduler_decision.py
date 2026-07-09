@@ -2,17 +2,17 @@
 
 from datetime import UTC, datetime
 
-from agentctl.core.enums import (
+from curator.core.enums import (
     EvidenceKind,
     HarnessStatus,
     LoopDecisionType,
     LoopStepType,
     StopCondition,
 )
-from agentctl.core.schema import EvidenceRef, HarnessRunResult
-from agentctl.loops.compiler import compile_coding_delivery_plan
-from agentctl.roles.registry import default_role_contracts
-from agentctl.scheduler.decision import decide_runtime
+from curator.core.schema import EvidenceRef, HarnessRunResult
+from curator.loops.compiler import compile_coding_delivery_plan
+from curator.roles.registry import default_role_contracts
+from curator.scheduler.decision import decide_runtime
 
 
 def _step(step_type: LoopStepType):

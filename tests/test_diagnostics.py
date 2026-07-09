@@ -1,10 +1,10 @@
 """Verify Curator diagnostics use cases and terminal renderers."""
 
-from agentctl.core.paths import build_curator_paths
-from agentctl.app import run_workflow_snapshot, write_init_state
-from agentctl.diagnostics.doctor import inspect_project_health
-from agentctl.diagnostics.status import inspect_project_status
-from agentctl.rendering.terminal import render_doctor_report, render_status_report
+from curator.core.paths import build_curator_paths
+from curator.app import run_workflow_snapshot, write_init_state
+from curator.diagnostics.doctor import inspect_project_health
+from curator.diagnostics.status import inspect_project_status
+from curator.rendering.terminal import render_doctor_report, render_status_report
 from fakes import CodingDeliveryFakeProvider
 
 

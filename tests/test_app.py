@@ -2,17 +2,17 @@
 
 import yaml
 
-from agentctl.app import (
+from curator.app import (
     preview_init,
     render_workflow,
     run_workflow_snapshot,
     write_init_state,
 )
-from agentctl.core.enums import LoopDecisionType, LoopStatus, StopCondition
-from agentctl.core.paths import build_curator_paths
-from agentctl.init.proposal import build_init_proposal
-from agentctl.state.db import connect_database
-from agentctl.state.repositories import load_loop_runs_for_session
+from curator.core.enums import LoopDecisionType, LoopStatus, StopCondition
+from curator.core.paths import build_curator_paths
+from curator.init.proposal import build_init_proposal
+from curator.state.db import connect_database
+from curator.state.repositories import load_loop_runs_for_session
 from fakes import CodingDeliveryFakeProvider
 
 

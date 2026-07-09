@@ -2,14 +2,14 @@
 
 from datetime import UTC, datetime
 
-from agentctl.core.enums import LoopStatus, RoleName, SessionMode, TaskStatus
-from agentctl.core.paths import build_curator_paths
-from agentctl.core.schema import LoopRunRecord, SessionRecord, TaskRecord
-from agentctl.state.db import connect_database, initialize_database
-from agentctl.state.loops import insert_loop_run, load_loop_runs_for_session
-from agentctl.state.repositories import load_session as load_session_from_facade
-from agentctl.state.sessions import insert_session, load_session
-from agentctl.state.tasks import insert_task, load_tasks_for_session
+from curator.core.enums import LoopStatus, RoleName, SessionMode, TaskStatus
+from curator.core.paths import build_curator_paths
+from curator.core.schema import LoopRunRecord, SessionRecord, TaskRecord
+from curator.state.db import connect_database, initialize_database
+from curator.state.loops import insert_loop_run, load_loop_runs_for_session
+from curator.state.repositories import load_session as load_session_from_facade
+from curator.state.sessions import insert_session, load_session
+from curator.state.tasks import insert_task, load_tasks_for_session
 
 
 def test_split_repository_modules_round_trip_core_records(tmp_path):

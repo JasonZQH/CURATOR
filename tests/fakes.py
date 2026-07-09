@@ -2,8 +2,8 @@
 
 from datetime import UTC, datetime
 
-from agentctl.core.enums import EvidenceKind, LoopStepType, ProviderName, RoleName
-from agentctl.core.schema import (
+from curator.core.enums import EvidenceKind, LoopStepType, ProviderName, RoleName
+from curator.core.schema import (
     EngineerImplementationOutput,
     EvidenceRef,
     HarnessRunSpec,
@@ -11,7 +11,7 @@ from agentctl.core.schema import (
     PMPlanOutput,
     QAValidationOutput,
 )
-from agentctl.providers.contracts import ProviderRunRequest, ProviderRunResponse
+from curator.providers.contracts import ProviderRunRequest, ProviderRunResponse
 
 
 class CodingDeliveryFakeProvider:

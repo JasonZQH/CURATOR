@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from agentctl.core.enums import (
+from curator.core.enums import (
     EvidenceKind,
     HarnessStatus,
     LoopStepType,
@@ -12,18 +12,18 @@ from agentctl.core.enums import (
     ProviderName,
     RoleName,
 )
-from agentctl.core.schema import (
+from curator.core.schema import (
     EvidenceRef,
     HarnessRunSpec,
     PMConfirmationOutput,
     PMPlanOutput,
     QAValidationOutput,
 )
-from agentctl.harness.artifacts import build_evidence_ref
-from agentctl.harness.context import build_context_refs
-from agentctl.harness.runtime import run_harness
-from agentctl.loops.templates import coding_delivery_loop
-from agentctl.providers.contracts import ProviderRunRequest, ProviderRunResponse
+from curator.harness.artifacts import build_evidence_ref
+from curator.harness.context import build_context_refs
+from curator.harness.runtime import run_harness
+from curator.loops.templates import coding_delivery_loop
+from curator.providers.contracts import ProviderRunRequest, ProviderRunResponse
 
 
 class StaticProvider:

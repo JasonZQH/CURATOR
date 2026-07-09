@@ -2,11 +2,11 @@
 
 from datetime import UTC, datetime
 
-from agentctl.core.enums import LoopStepType, MessageType, RoleName
-from agentctl.loops.compiler import compile_coding_delivery_plan
-from agentctl.scheduler.ids import scoped_harness_id, scoped_iteration_id, scoped_task_id
-from agentctl.scheduler.session_factory import build_workflow_session_records
-from agentctl.scheduler.step_writer import message_type_for_step
+from curator.core.enums import LoopStepType, MessageType, RoleName
+from curator.loops.compiler import compile_coding_delivery_plan
+from curator.scheduler.ids import scoped_harness_id, scoped_iteration_id, scoped_task_id
+from curator.scheduler.session_factory import build_workflow_session_records
+from curator.scheduler.step_writer import message_type_for_step
 
 
 def test_scheduler_ids_are_loop_scoped_and_stable():

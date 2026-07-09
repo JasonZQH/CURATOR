@@ -2,14 +2,14 @@
 
 from datetime import UTC, datetime
 
-from agentctl.core.enums import EvidenceKind
-from agentctl.core.schema import RoleContract
-from agentctl.loops.compiler import compile_coding_delivery_plan
-from agentctl.roles.registry import default_role_contracts
-from agentctl.scheduler.engine import create_workflow_session
-from agentctl.scheduler.snapshots import load_workflow_snapshot
-from agentctl.state.db import connect_database, initialize_database
-from agentctl.tui.workflow_panel import render_workflow_lines
+from curator.core.enums import EvidenceKind
+from curator.core.schema import RoleContract
+from curator.loops.compiler import compile_coding_delivery_plan
+from curator.roles.registry import default_role_contracts
+from curator.scheduler.engine import create_workflow_session
+from curator.scheduler.snapshots import load_workflow_snapshot
+from curator.state.db import connect_database, initialize_database
+from curator.tui.workflow_panel import render_workflow_lines
 
 
 def test_render_workflow_lines_includes_dynamic_tasks_and_role_selections(tmp_path):

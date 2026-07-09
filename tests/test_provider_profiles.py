@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-from agentctl.core.enums import (
+from curator.core.enums import (
     ProviderBindingStatus,
     ProviderName,
     ProviderProfileStatus,
@@ -11,20 +11,20 @@ from agentctl.core.enums import (
     RoleInstanceStatus,
     RoleName,
 )
-from agentctl.core.paths import build_curator_paths
-from agentctl.core.schema import (
+from curator.core.paths import build_curator_paths
+from curator.core.schema import (
     ProviderProfileRecord,
     ProviderSessionRecord,
     RoleInstanceRecord,
     RoleProviderBindingRecord,
 )
-from agentctl.providers.profiles import (
+from curator.providers.profiles import (
     record_provider_quota_state,
     resolve_provider_identity,
     resolve_provider_profile_for_role,
 )
-from agentctl.state.db import connect_database, initialize_database
-from agentctl.state.repositories import (
+from curator.state.db import connect_database, initialize_database
+from curator.state.repositories import (
     insert_provider_profile,
     insert_provider_session,
     insert_role_instance,

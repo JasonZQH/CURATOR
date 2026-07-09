@@ -6,8 +6,8 @@ from pathlib import Path
 import yaml
 from typer.testing import CliRunner
 
-from agentctl.core.paths import build_curator_paths
-from agentctl.cli import app
+from curator.core.paths import build_curator_paths
+from curator.cli import app
 
 
 def test_curator_cli_starts_with_version():
@@ -20,22 +20,11 @@ def test_curator_cli_starts_with_version():
     assert "curator 0.1.0" in result.stdout
 
 
-def test_pyproject_exposes_curator_and_legacy_agentctl_scripts():
-    """Verify packaging exposes Curator while keeping the legacy agentctl alias."""
+def test_pyproject_exposes_only_curator_script():
+    """Verify packaging exposes only the Curator console script."""
     pyproject = tomllib.loads((Path(__file__).parents[1] / "pyproject.toml").read_text())
 
-    assert pyproject["project"]["scripts"]["curator"] == "agentctl.cli:app"
-    assert pyproject["project"]["scripts"]["agentctl"] == "agentctl.cli:app"
-
-
-def test_legacy_agentctl_entrypoint_warns_to_use_curator():
-    """Verify the legacy agentctl entrypoint tells users to use Curator."""
-    runner = CliRunner()
-
-    result = runner.invoke(app, [], input="/quit\n", prog_name="agentctl")
-
-    assert result.exit_code == 0
-    assert "agentctl is now Curator. Please use `curator`." in result.stdout
+    assert pyproject["project"]["scripts"] == {"curator": "curator.cli:app"}
 
 
 def test_bare_curator_opens_natural_language_shell(tmp_path, monkeypatch):

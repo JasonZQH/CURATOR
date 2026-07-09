@@ -11,11 +11,17 @@ htmlcov/
 # Build outputs
 build/
 dist/
+src/*.egg-info/
 *.egg-info/
 
-# Local Curator/Agentctl runtime state
+# Local/generated manifests
+packages.json
+*.local.toml
+*.tmp.toml
+*.generated.toml
+
+# Local Curator runtime state
 .curator/
-.agentctl/
 *.sqlite
 *.sqlite3
 

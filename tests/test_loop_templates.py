@@ -1,13 +1,13 @@
 """Verify Curator-owned loop templates."""
 
-from agentctl.core.enums import (
+from curator.core.enums import (
     EvidenceKind,
     LoopDecisionType,
     LoopStepType,
     RoleName,
     StopCondition,
 )
-from agentctl.loops.templates import coding_delivery_loop, role_for_step, template_requires_evidence
+from curator.loops.templates import coding_delivery_loop, role_for_step, template_requires_evidence
 
 
 def test_coding_delivery_loop_has_fixed_phase0_steps():

@@ -7,15 +7,15 @@ from pathlib import Path
 
 import pytest
 
-from agentctl.core.enums import LoopStepType, ProviderErrorKind, ProviderName, RoleName
-from agentctl.core.schema import HarnessRunSpec
-from agentctl.providers.contracts import (
+from curator.core.enums import LoopStepType, ProviderErrorKind, ProviderName, RoleName
+from curator.core.schema import HarnessRunSpec
+from curator.providers.contracts import (
     ProviderCancelledError,
     ProviderRunRequest,
     ProviderRunResponse,
 )
-from agentctl.providers.driver import LegacyProviderDriver, SubprocessDriver
-from agentctl.providers.events import ProviderEvent, ProviderEventKind
+from curator.providers.driver import LegacyProviderDriver, SubprocessDriver
+from curator.providers.events import ProviderEvent, ProviderEventKind
 from fakes import CodingDeliveryFakeProvider
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "fake_provider_cli.py"

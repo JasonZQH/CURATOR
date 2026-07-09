@@ -2,11 +2,11 @@
 
 import yaml
 
-from agentctl.core.enums import EvidenceKind, GoalStatus, RoleName
-from agentctl.core.paths import build_curator_paths
-from agentctl.core.schema import GoalContract, GoalCriterion, GoalVerification
-from agentctl.goals.store import accept_goal, load_goal, load_goal_revision, propose_goal, save_goal
-from agentctl.state.db import connect_database, initialize_database
+from curator.core.enums import EvidenceKind, GoalStatus, RoleName
+from curator.core.paths import build_curator_paths
+from curator.core.schema import GoalContract, GoalCriterion, GoalVerification
+from curator.goals.store import accept_goal, load_goal, load_goal_revision, propose_goal, save_goal
+from curator.state.db import connect_database, initialize_database
 
 
 def test_goal_contract_models_accept_minimal_goal():

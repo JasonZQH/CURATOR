@@ -4,8 +4,8 @@ import asyncio
 
 from textual.widgets import Static
 
-from agentctl.app import run_workflow_snapshot, write_init_state
-from agentctl.tui.app import WorkflowApp
+from curator.app import run_workflow_snapshot, write_init_state
+from curator.tui.app import WorkflowApp
 from fakes import CodingDeliveryFakeProvider
 
 

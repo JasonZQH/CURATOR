@@ -2,13 +2,13 @@
 
 from datetime import UTC, datetime
 
-from agentctl.core.enums import EvidenceKind
-from agentctl.core.schema import RoleContract
-from agentctl.loops.compiler import compile_coding_delivery_plan
-from agentctl.roles.registry import default_role_contracts
-from agentctl.scheduler.engine import create_workflow_session
-from agentctl.scheduler.snapshots import load_workflow_snapshot
-from agentctl.state.db import connect_database, initialize_database
+from curator.core.enums import EvidenceKind
+from curator.core.schema import RoleContract
+from curator.loops.compiler import compile_coding_delivery_plan
+from curator.roles.registry import default_role_contracts
+from curator.scheduler.engine import create_workflow_session
+from curator.scheduler.snapshots import load_workflow_snapshot
+from curator.state.db import connect_database, initialize_database
 
 
 def test_load_workflow_snapshot_includes_role_selection_ledger(tmp_path):

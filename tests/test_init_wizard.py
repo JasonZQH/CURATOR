@@ -1,9 +1,9 @@
 """Verify Curator initialization behavior."""
 
-from agentctl.core.enums import RoleName
-from agentctl.core.paths import build_curator_paths
-from agentctl.init.proposal import build_init_proposal, render_init_proposal
-from agentctl.init.wizard import create_agentctl_state, create_curator_state
+from curator.core.enums import RoleName
+from curator.core.paths import build_curator_paths
+from curator.init.proposal import build_init_proposal, render_init_proposal
+from curator.init.wizard import create_curator_state
 
 
 def test_build_init_proposal_lists_phase0_files_without_writing(tmp_path):
@@ -78,15 +78,10 @@ def test_create_curator_state_preserves_existing_files(tmp_path):
     assert existing_role not in result.created_files
 
 
-def test_legacy_create_agentctl_state_name_remains_alias():
-    """Verify the old init writer name remains a compatibility alias."""
-    assert create_agentctl_state is create_curator_state
-
-
 def test_create_curator_state_seeds_default_role_pool(tmp_path):
     """Verify init seeds durable role instances before any goal is typed."""
-    from agentctl.state.db import connect_database, initialize_database
-    from agentctl.state.repositories import load_role_instances
+    from curator.state.db import connect_database, initialize_database
+    from curator.state.repositories import load_role_instances
 
     proposal = build_init_proposal(tmp_path)
     create_curator_state(proposal)

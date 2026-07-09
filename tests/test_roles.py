@@ -2,9 +2,9 @@
 
 import yaml
 
-from agentctl.core.enums import RoleName
-from agentctl.core.paths import build_curator_paths
-from agentctl.team.roles import (
+from curator.core.enums import RoleName
+from curator.core.paths import build_curator_paths
+from curator.team.roles import (
     default_role_contract_documents,
     default_role_documents,
     load_role_contracts,

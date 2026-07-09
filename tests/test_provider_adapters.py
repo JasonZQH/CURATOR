@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from agentctl.core.enums import (
+from curator.core.enums import (
     EvidenceKind,
     LoopDecisionType,
     LoopStepType,
@@ -14,25 +14,25 @@ from agentctl.core.enums import (
     RoleName,
     StepExecutorType,
 )
-from agentctl.core.schema import CompiledLoopStep, EvidenceRef, HarnessRunSpec
-from agentctl.context.packaging import ContextPackage
-from agentctl.providers.claude_code import ClaudeCodeDriver
-from agentctl.providers.codex_cli import CodexCliDriver
-from agentctl.providers.contracts import ProviderRunRequest
-from agentctl.providers.events import ProviderEventKind
-from agentctl.providers.registry import ProviderConfigurationError, resolve_provider_for_step
-from agentctl.providers.setup import add_provider_profile
-from agentctl.runtime.action_policy import ActionPolicy
-from agentctl.runtime.permissions import claude_permission_args, codex_sandbox_args
-from agentctl.runtime.role_pool import ensure_default_role_pool
-from agentctl.harness.workspace import (
+from curator.core.schema import CompiledLoopStep, EvidenceRef, HarnessRunSpec
+from curator.context.packaging import ContextPackage
+from curator.providers.claude_code import ClaudeCodeDriver
+from curator.providers.codex_cli import CodexCliDriver
+from curator.providers.contracts import ProviderRunRequest
+from curator.providers.events import ProviderEventKind
+from curator.providers.registry import ProviderConfigurationError, resolve_provider_for_step
+from curator.providers.setup import add_provider_profile
+from curator.runtime.action_policy import ActionPolicy
+from curator.runtime.permissions import claude_permission_args, codex_sandbox_args
+from curator.runtime.role_pool import ensure_default_role_pool
+from curator.harness.workspace import (
     WorkspaceDirtyError,
     capture_baseline,
     capture_workspace_evidence,
     require_clean_baseline,
 )
-from agentctl.state.db import connect_database, initialize_database
-from agentctl.state.repositories import (
+from curator.state.db import connect_database, initialize_database
+from curator.state.repositories import (
     insert_role_provider_binding,
     load_provider_profiles,
 )
@@ -265,9 +265,9 @@ def test_add_provider_profile_rejects_broken_cli(tmp_path, monkeypatch):
         stdout = ""
         stderr = "spawn ENOENT"
 
-    monkeypatch.setattr("agentctl.providers.setup.shutil.which", lambda binary: binary)
+    monkeypatch.setattr("curator.providers.setup.shutil.which", lambda binary: binary)
     monkeypatch.setattr(
-        "agentctl.providers.setup.subprocess.run", lambda *args, **kwargs: Completed()
+        "curator.providers.setup.subprocess.run", lambda *args, **kwargs: Completed()
     )
 
     result = add_provider_profile(connection, "codex")
@@ -331,8 +331,8 @@ def test_resolve_provider_for_step_uses_bound_profile(tmp_path):
 
 def _seed_codex_profile(connection) -> None:
     """Insert a codex provider profile directly, bypassing CLI detection."""
-    from agentctl.core.schema import ProviderProfileRecord
-    from agentctl.state.repositories import insert_provider_profile
+    from curator.core.schema import ProviderProfileRecord
+    from curator.state.repositories import insert_provider_profile
 
     now = datetime(2026, 7, 7, tzinfo=UTC)
     insert_provider_profile(
@@ -351,8 +351,8 @@ def _seed_codex_profile(connection) -> None:
 
 def _bind_writer_to_codex(connection) -> None:
     """Bind the default writer slot instance to the codex profile."""
-    from agentctl.core.enums import ProviderBindingStatus
-    from agentctl.core.schema import RoleProviderBindingRecord
+    from curator.core.enums import ProviderBindingStatus
+    from curator.core.schema import RoleProviderBindingRecord
 
     now = datetime(2026, 7, 7, tzinfo=UTC)
     insert_role_provider_binding(

@@ -1,7 +1,7 @@
 """Verify task-backed node inspection views."""
 
-from agentctl.app import run_workflow_snapshot
-from agentctl.nodes.inspection import current_node, list_nodes, render_node_view
+from curator.app import run_workflow_snapshot
+from curator.nodes.inspection import current_node, list_nodes, render_node_view
 from fakes import CodingDeliveryFakeProvider
 
 

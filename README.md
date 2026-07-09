@@ -28,7 +28,7 @@
     <section id="how">
       <h2>How</h2>
       <h3>Run locally</h3>
-      <pre><code>cd /Users/mydev/Desktop/AgenticOS/agentctl-phase0
+      <pre><code>cd /path/to/curator
 source .venv/bin/activate
 curator</code></pre>
 

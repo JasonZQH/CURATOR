@@ -7,8 +7,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
-from agentctl.core.enums import EvidenceKind, RoleName
-from agentctl.harness.verifier import (
+from curator.core.enums import EvidenceKind, RoleName
+from curator.harness.verifier import (
     VerificationSpec,
     build_validation_evidence,
     run_verification,

@@ -2,18 +2,18 @@
 
 from datetime import UTC, datetime
 
-from agentctl.core.enums import ApprovalKind, ApprovalStatus
-from agentctl.core.paths import build_curator_paths
-from agentctl.runtime.action_policy import ActionPolicy
-from agentctl.runtime.vcs import (
+from curator.core.enums import ApprovalKind, ApprovalStatus
+from curator.core.paths import build_curator_paths
+from curator.runtime.action_policy import ActionPolicy
+from curator.runtime.vcs import (
     BranchIntent,
     DiffRef,
     PullRequestIntent,
     RemoteActionRequest,
     build_repo_state_summary,
 )
-from agentctl.state.db import connect_database, initialize_database
-from agentctl.state.repositories import load_approval_requests
+from curator.state.db import connect_database, initialize_database
+from curator.state.repositories import load_approval_requests
 
 
 def _connection(tmp_path):

@@ -1,9 +1,9 @@
 """Verify deterministic role candidate selection from role contracts."""
 
-from agentctl.core.enums import EvidenceKind
-from agentctl.core.schema import RoleContract
-from agentctl.roles.registry import default_role_contracts
-from agentctl.roles.selection import select_role_candidates
+from curator.core.enums import EvidenceKind
+from curator.core.schema import RoleContract
+from curator.roles.registry import default_role_contracts
+from curator.roles.selection import select_role_candidates
 
 
 def test_select_role_candidates_matches_default_role_contract_signals():

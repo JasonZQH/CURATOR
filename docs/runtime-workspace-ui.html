@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Runtime Workspace UI</title>
+    <style>
+      body {
+        color: #1f2937;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        line-height: 1.55;
+        margin: 0 auto;
+        max-width: 920px;
+        padding: 32px 20px 48px;
+      }
+
+      code {
+        background: #f3f4f6;
+        border-radius: 4px;
+        padding: 2px 4px;
+      }
+
+      pre {
+        background: #111827;
+        border-radius: 8px;
+        color: #f9fafb;
+        overflow-x: auto;
+        padding: 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Runtime Workspace UI</h1>
+
+    <h2>What</h2>
+    <p>
+      The Runtime Workspace UI makes the runtime graph the center of the user
+      experience. Conversation remains an input, but the primary objects are
+      runtime state, agents, provider profiles, queue items, evidence, events,
+      pauses, and next actions.
+    </p>
+
+    <h2>How</h2>
+    <p>
+      The CLI uses <code>/workbench</code> as the main runtime view. Supporting
+      commands expose focused slices of state without requiring the user to
+      inspect SQLite or remember hidden configuration.
+    </p>
+    <pre><code>/workbench
+/agents
+/providers
+/agent status engineer.1
+/agent bind engineer.1 codex-work
+/agent switch engineer.1 claude-team
+/queue
+/queue tick
+/approvals
+/approve approval-id optional message
+/reject approval-id optional message
+/evidence
+/node current
+/resume continue with this narrower fix</code></pre>
+    <p>
+      The shell workspace reads the SQLite runtime ledger directly. The Textual
+      TUI renders separate <code>WorkflowSnapshot</code> panels for Runtime,
+      Active Roles, Providers, Evidence, and Events. This keeps provider/tool
+      output out of the conversation stream and makes runtime state easier to
+      scan.
+    </p>
+
+    <h2>Why</h2>
+    <p>
+      AgenticOS is a runtime, not only a chat interface. Users need to know which
+      role is active, which provider profile is bound, whether quota is healthy,
+      what evidence exists, and which command will move the system forward. This
+      mirrors the useful parts of Hermes-style agent observability while keeping
+      the AgenticOS center of gravity on runtime state.
+    </p>
+
+    <h2>Future improvements/considerations/trade-offs</h2>
+    <p>
+      This version is snapshot-based. Future work can add streaming runtime
+      events, interrupt-and-redirect controls, command palette overlays, session
+      switching, provider setup flows, and richer DAG visualization. Provider
+      switching remains manual by design; automatic switching should require an
+      explicit policy, quota source, approval model, and trust boundary.
+    </p>
+  </body>
+</html>

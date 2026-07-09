@@ -2,17 +2,17 @@
 
 from datetime import UTC, datetime
 
-from agentctl.core.enums import LoopStatus, ProviderBindingStatus, ProviderProfileStatus
-from agentctl.core.schema import ProviderProfileRecord, RoleProviderBindingRecord
-from agentctl.goals.store import accept_goal, propose_goal, save_goal
-from agentctl.app import start_goal_loop, write_init_state
-from agentctl.core.enums import ProviderName
-from agentctl.core.paths import build_curator_paths
+from curator.core.enums import LoopStatus, ProviderBindingStatus, ProviderProfileStatus
+from curator.core.schema import ProviderProfileRecord, RoleProviderBindingRecord
+from curator.goals.store import accept_goal, propose_goal, save_goal
+from curator.app import start_goal_loop, write_init_state
+from curator.core.enums import ProviderName
+from curator.core.paths import build_curator_paths
 from fakes import CodingDeliveryFakeProvider
-from agentctl.runtime.role_pool import ensure_default_role_pool
-from agentctl.scheduler.resume import resume_workflow_sync
-from agentctl.state.db import connect_database, initialize_database
-from agentctl.state.repositories import (
+from curator.runtime.role_pool import ensure_default_role_pool
+from curator.scheduler.resume import resume_workflow_sync
+from curator.state.db import connect_database, initialize_database
+from curator.state.repositories import (
     insert_provider_profile,
     insert_role_provider_binding,
     load_latest_pause_record,
@@ -113,7 +113,7 @@ def test_confirm_gate_resume_completes_loop(tmp_path, monkeypatch):
 
 def test_resume_refuses_when_no_open_pause(tmp_path):
     """Verify resume returns False when there is no open pause to continue."""
-    from agentctl.scheduler.engine import create_workflow_session
+    from curator.scheduler.engine import create_workflow_session
 
     write_init_state(tmp_path)
 

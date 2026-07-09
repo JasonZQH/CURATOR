@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 
-from agentctl.core.enums import (
+from curator.core.enums import (
     ApprovalKind,
     ApprovalStatus,
     AssignmentStatus,
@@ -15,19 +15,19 @@ from agentctl.core.enums import (
     WorkItemKind,
     WorkItemStatus,
 )
-from agentctl.core.paths import build_curator_paths
-from agentctl.core.schema import (
+from curator.core.paths import build_curator_paths
+from curator.core.schema import (
     ApprovalRequestRecord,
     ProviderProfileRecord,
     QuotaStateRecord,
     RoleInstanceRecord,
     WorkItemRecord,
 )
-from agentctl.runtime.queue import enqueue_followup_qa_work, tick_work_queue
-from agentctl.runtime.action_policy import ActionPolicy, ActionRequest, ActionType
-from agentctl.shell.repl import ShellState, handle_shell_input
-from agentctl.state.db import connect_database, initialize_database
-from agentctl.state.repositories import (
+from curator.runtime.queue import enqueue_followup_qa_work, tick_work_queue
+from curator.runtime.action_policy import ActionPolicy, ActionRequest, ActionType
+from curator.shell.repl import ShellState, handle_shell_input
+from curator.state.db import connect_database, initialize_database
+from curator.state.repositories import (
     insert_approval_request,
     insert_provider_profile,
     insert_quota_state,
@@ -703,7 +703,7 @@ def test_action_policy_gate_records_permission_handoff_for_outside_write(tmp_pat
 
 def test_next_actions_guides_fresh_project_to_provider_setup(tmp_path):
     """Verify a fresh initialized project always gets a concrete next action."""
-    from agentctl.runtime.workbench import render_next_actions
+    from curator.runtime.workbench import render_next_actions
 
     connection = connect_database(build_curator_paths(tmp_path).database)
     initialize_database(connection)

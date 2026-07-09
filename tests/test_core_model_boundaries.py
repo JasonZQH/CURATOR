@@ -1,19 +1,17 @@
 """Verify core models are split by domain with schema facade compatibility."""
 
-from agentctl.core.models.base import AgentctlModel, CuratorModel
-from agentctl.core.models.harness import HarnessRunSpec, PMPlanOutput
-from agentctl.core.models.goals import GoalContract, GoalCriterion
-from agentctl.core.models.init import InitProposal
-from agentctl.core.models.loops import CompiledLoopPlan, LoopRunRecord
-from agentctl.core.models.paths import AgentctlPaths, CuratorPaths
-from agentctl.core.models.roles import RoleCollaborator, RoleContract, RoleHandoffRule
-from agentctl.core.models.session import EventRecord, SessionRecord, TaskRecord
-from agentctl.core.models.snapshot import WorkflowSnapshot
-from agentctl.core.schema import (
-    AgentctlModel as FacadeAgentctlModel,
-    AgentctlPaths as FacadeAgentctlPaths,
-    CuratorPaths as FacadeCuratorPaths,
+from curator.core.models.base import CuratorModel
+from curator.core.models.harness import HarnessRunSpec, PMPlanOutput
+from curator.core.models.goals import GoalContract, GoalCriterion
+from curator.core.models.init import InitProposal
+from curator.core.models.loops import CompiledLoopPlan, LoopRunRecord
+from curator.core.models.paths import CuratorPaths
+from curator.core.models.roles import RoleCollaborator, RoleContract, RoleHandoffRule
+from curator.core.models.session import EventRecord, SessionRecord, TaskRecord
+from curator.core.models.snapshot import WorkflowSnapshot
+from curator.core.schema import (
     CuratorModel as FacadeCuratorModel,
+    CuratorPaths as FacadeCuratorPaths,
     CompiledLoopPlan as FacadeCompiledLoopPlan,
     EventRecord as FacadeEventRecord,
     GoalContract as FacadeGoalContract,
@@ -34,9 +32,7 @@ from agentctl.core.schema import (
 def test_core_model_domains_are_importable_from_focused_modules():
     """Verify focused model modules expose the expected domain classes."""
     assert CuratorModel.__name__ == "CuratorModel"
-    assert AgentctlModel is CuratorModel
     assert CuratorPaths.__name__ == "CuratorPaths"
-    assert AgentctlPaths is CuratorPaths
     assert InitProposal.__name__ == "InitProposal"
     assert SessionRecord.__name__ == "SessionRecord"
     assert TaskRecord.__name__ == "TaskRecord"
@@ -56,8 +52,6 @@ def test_core_model_domains_are_importable_from_focused_modules():
 def test_core_schema_reexports_focused_model_classes():
     """Verify the legacy schema facade points at focused model classes."""
     assert FacadeCuratorModel is CuratorModel
-    assert FacadeAgentctlModel is CuratorModel
-    assert FacadeAgentctlPaths is AgentctlPaths
     assert FacadeCuratorPaths is CuratorPaths
     assert FacadeInitProposal is InitProposal
     assert FacadeSessionRecord is SessionRecord

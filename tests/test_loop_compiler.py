@@ -1,15 +1,15 @@
 """Verify loop templates compile into scheduler-ready plans."""
 
-from agentctl.core.enums import (
+from curator.core.enums import (
     EvidenceKind,
     LoopDecisionType,
     LoopStepType,
     RoleName,
     StopCondition,
 )
-from agentctl.core.schema import RoleContract
-from agentctl.loops.compiler import compile_coding_delivery_plan
-from agentctl.roles.registry import default_role_contracts
+from curator.core.schema import RoleContract
+from curator.loops.compiler import compile_coding_delivery_plan
+from curator.roles.registry import default_role_contracts
 
 
 def test_compile_coding_delivery_plan_outputs_dynamic_scheduler_steps():
@@ -118,8 +118,8 @@ def test_compile_coding_delivery_plan_inserts_selected_reviewer_roles():
 
 def test_compile_single_writer_plan_builds_functional_slots():
     """Verify the single-writer plan compiles writer, verifier, reviewer, and gate."""
-    from agentctl.core.enums import StepExecutorType
-    from agentctl.loops.compiler import compile_single_writer_plan
+    from curator.core.enums import StepExecutorType
+    from curator.loops.compiler import compile_single_writer_plan
 
     plan = compile_single_writer_plan(
         session_id="session-writer-001",

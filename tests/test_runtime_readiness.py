@@ -3,13 +3,13 @@
 from datetime import UTC, datetime
 from pathlib import Path
 
-from agentctl.app import start_goal_loop, write_init_state
-from agentctl.context.packaging import build_context_package, build_pm_research_packet
-from agentctl.core.enums import LoopStepType, ProviderName, RoleName
-from agentctl.core.paths import build_curator_paths
-from agentctl.core.schema import HarnessRunSpec, QAValidationOutput
-from agentctl.goals.store import accept_goal, propose_goal, save_goal
-from agentctl.providers.contracts import (
+from curator.app import start_goal_loop, write_init_state
+from curator.context.packaging import build_context_package, build_pm_research_packet
+from curator.core.enums import LoopStepType, ProviderName, RoleName
+from curator.core.paths import build_curator_paths
+from curator.core.schema import HarnessRunSpec, QAValidationOutput
+from curator.goals.store import accept_goal, propose_goal, save_goal
+from curator.providers.contracts import (
     HandoffRequest,
     ProviderErrorKind,
     ProviderCancelledError,
@@ -18,11 +18,11 @@ from agentctl.providers.contracts import (
     ScopeChangeSignal,
 )
 from fakes import CodingDeliveryFakeProvider
-from agentctl.runtime.action_policy import ActionPolicy, ActionRequest, ActionType
-from agentctl.scheduler.snapshots import load_latest_workflow_snapshot
-from agentctl.shell.repl import ShellState, handle_shell_input
-from agentctl.state.db import connect_database, initialize_database
-from agentctl.state.repositories import (
+from curator.runtime.action_policy import ActionPolicy, ActionRequest, ActionType
+from curator.scheduler.snapshots import load_latest_workflow_snapshot
+from curator.shell.repl import ShellState, handle_shell_input
+from curator.state.db import connect_database, initialize_database
+from curator.state.repositories import (
     load_context_packages_for_run,
     load_goal_draft_for_discovery,
     load_latest_discovery_session,

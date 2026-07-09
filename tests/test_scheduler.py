@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-from agentctl.core.enums import (
+from curator.core.enums import (
     EvidenceKind,
     HarnessStatus,
     LoopDecisionType,
@@ -13,13 +13,13 @@ from agentctl.core.enums import (
     StopCondition,
     TaskStatus,
 )
-from agentctl.core.schema import HarnessRunSpec, QAValidationOutput, RoleContract
-from agentctl.loops.compiler import compile_coding_delivery_plan
+from curator.core.schema import HarnessRunSpec, QAValidationOutput, RoleContract
+from curator.loops.compiler import compile_coding_delivery_plan
 from fakes import CodingDeliveryFakeProvider
-from agentctl.scheduler.engine import create_workflow_session, run_workflow
-from agentctl.roles.registry import default_role_contracts
-from agentctl.state.db import connect_database, initialize_database
-from agentctl.state.repositories import (
+from curator.scheduler.engine import create_workflow_session, run_workflow
+from curator.roles.registry import default_role_contracts
+from curator.state.db import connect_database, initialize_database
+from curator.state.repositories import (
     load_evidence_refs_for_run,
     load_loop_decisions_for_run,
     load_loop_iterations_for_run,
@@ -485,7 +485,7 @@ def test_run_workflow_pauses_with_max_iterations_stop_condition(tmp_path):
 
 def test_create_workflow_session_persists_compiled_plan_for_resume(tmp_path):
     """Verify the compiled plan round-trips through loop_runs metadata."""
-    from agentctl.scheduler.engine import load_compiled_plan_for_run
+    from curator.scheduler.engine import load_compiled_plan_for_run
 
     now = datetime(2026, 6, 25, 15, 20, tzinfo=UTC)
     connection = connect_database(tmp_path / ".curator" / "curator.sqlite")

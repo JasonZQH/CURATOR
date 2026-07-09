@@ -3,9 +3,9 @@
 import pytest
 from pydantic import ValidationError
 
-from agentctl.core.enums import EvidenceKind, RoleName
-from agentctl.core.schema import RoleCollaborator, RoleContract, RoleHandoffRule
-from agentctl.roles.registry import default_role_contracts, get_default_role_contract
+from curator.core.enums import EvidenceKind, RoleName
+from curator.core.schema import RoleCollaborator, RoleContract, RoleHandoffRule
+from curator.roles.registry import default_role_contracts, get_default_role_contract
 
 
 def test_default_role_contracts_express_routing_and_evidence_expectations():

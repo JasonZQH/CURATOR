@@ -2,16 +2,16 @@
 
 from datetime import UTC, datetime
 
-from agentctl.context.packaging import build_context_package
-from agentctl.core.enums import (
+from curator.context.packaging import build_context_package
+from curator.core.enums import (
     EvidenceKind,
     HarnessStatus,
     LoopDecisionType,
     LoopStepType,
     RoleName,
 )
-from agentctl.core.paths import build_curator_paths
-from agentctl.core.schema import (
+from curator.core.paths import build_curator_paths
+from curator.core.schema import (
     EvidenceRef,
     HarnessRunSpec,
     LoopDecisionRecord,
@@ -19,17 +19,17 @@ from agentctl.core.schema import (
     MemoryEntryRecord,
     QAValidationOutput,
 )
-from agentctl.memory.distill import record_decision_memory
+from curator.memory.distill import record_decision_memory
 from fakes import CodingDeliveryFakeProvider
-from agentctl.scheduler.engine import create_workflow_session, run_workflow
-from agentctl.shell.repl import ShellState, handle_shell_input
-from agentctl.state.db import connect_database, initialize_database
-from agentctl.state.repositories import (
+from curator.scheduler.engine import create_workflow_session, run_workflow
+from curator.shell.repl import ShellState, handle_shell_input
+from curator.state.db import connect_database, initialize_database
+from curator.state.repositories import (
     insert_memory_entry,
     load_loop_runs_for_session,
     load_memory_entries,
 )
-from agentctl.team.memory import default_memory_documents, write_default_memory
+from curator.team.memory import default_memory_documents, write_default_memory
 
 
 class _AlwaysFailValidationProvider(CodingDeliveryFakeProvider):

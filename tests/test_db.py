@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-from agentctl.core.enums import (
+from curator.core.enums import (
     EvidenceKind,
     EventType,
     HarnessStatus,
@@ -22,8 +22,8 @@ from agentctl.core.enums import (
     QuotaStatus,
     RoleInstanceStatus,
 )
-from agentctl.core.paths import build_curator_paths
-from agentctl.core.schema import (
+from curator.core.paths import build_curator_paths
+from curator.core.schema import (
     DoneCriteria,
     EventRecord,
     EvidenceRef,
@@ -51,8 +51,8 @@ from agentctl.core.schema import (
     TaskRecord,
     WorkflowSnapshot,
 )
-from agentctl.state.db import connect_database, initialize_database
-from agentctl.state.repositories import (
+from curator.state.db import connect_database, initialize_database
+from curator.state.repositories import (
     insert_evidence_ref,
     insert_event,
     insert_loop_decision,
