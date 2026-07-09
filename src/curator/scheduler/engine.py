@@ -140,7 +140,9 @@ class LoopExecutionContext:
             return self.driver_resolver(step)
         if self.driver is None:
             raise ProviderConfigurationError(
-                "No provider driver configured. Run `curator provider add <name>`."
+                "No provider driver configured. Connect one with /provider add "
+                "<name> in the Curator shell (or `curator provider add <name>` "
+                "in your terminal)."
             )
         return self.driver
 

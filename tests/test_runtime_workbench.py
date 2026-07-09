@@ -27,6 +27,7 @@ from curator.runtime.queue import enqueue_followup_qa_work, tick_work_queue
 from curator.runtime.action_policy import ActionPolicy, ActionRequest, ActionType
 from curator.shell.repl import ShellState, handle_shell_input
 from curator.state.db import connect_database, initialize_database
+from fakes import enable_live_mode, install_fake_claude
 from curator.state.repositories import (
     insert_approval_request,
     insert_provider_profile,
@@ -226,8 +227,10 @@ def test_approvals_are_scoped_runtime_records_not_timeline_messages(tmp_path):
     assert event_count == 0
 
 
-def test_goal_acceptance_writes_scoped_approval_ledger(tmp_path):
+def test_goal_acceptance_writes_scoped_approval_ledger(tmp_path, monkeypatch):
     """Verify yes acts as explicit approval while preserving shell acceptance flow."""
+    enable_live_mode(tmp_path)
+    install_fake_claude(tmp_path, monkeypatch)
     state = ShellState(project_root=tmp_path, gate_mode=True)
 
     handle_shell_input(state, "Fix mobile login layout")
@@ -638,6 +641,7 @@ def test_shell_agent_status_shows_binding_choices_and_actions(tmp_path):
 
 def test_discovery_bootstraps_user_visible_role_pool(tmp_path):
     """Verify first PM discovery makes default role pool visible to users."""
+    enable_live_mode(tmp_path)
     state = ShellState(project_root=tmp_path)
 
     handle_shell_input(state, "Fix mobile login layout")

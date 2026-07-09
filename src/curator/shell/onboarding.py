@@ -29,7 +29,7 @@ def apply_first_run_init(project_root: Path | str) -> str:
     if detected:
         names = ", ".join(provider.value for provider in detected)
         lines.append(f"Detected provider CLIs: {names}")
-        lines.append(f"Next: {provider_setup_hint()}")
+        lines.append(f"Next: {provider_setup_hint(surface='shell')}")
     else:
         lines.append("Next: install Claude Code or Codex, then run /provider add <name>.")
     return "\n".join(lines)
@@ -52,9 +52,9 @@ def resolve_mode_for_project(project_root: Path | str) -> RuntimeMode:
 def _next_action(project_root: Path | str, mode: RuntimeMode) -> str:
     """Return the single most useful next action for the welcome banner."""
     if first_run_needed(project_root):
-        return "/init (or curator init) to set up this project"
+        return "/init — set up this project"
     if mode.label == "setup":
-        return provider_setup_hint()
+        return provider_setup_hint(surface="shell")
     return "Type what you want to work on."
 
 

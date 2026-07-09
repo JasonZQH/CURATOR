@@ -105,6 +105,8 @@ def resolve_provider_for_step(
         slot_hint = f" for slot {step.slot}" if step.slot else ""
         raise ProviderConfigurationError(
             "No active provider profile is bound"
-            f"{slot_hint}. Run `curator provider add <name>` and bind writer/reviewer."
+            f"{slot_hint}. Connect one with /provider add <name> in the Curator "
+            "shell (or `curator provider add <name>` in your terminal), then "
+            "bind writer/reviewer."
         )
     return _driver_for_bound_profile(connection, profile, project_root, slot=step.slot)
