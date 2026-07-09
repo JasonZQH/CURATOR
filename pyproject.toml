@@ -11,7 +11,7 @@ readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [
-  { name = "Curator contributors" },
+  { name = "JasonZQH" },
 ]
 keywords = [
   "agents",
@@ -38,6 +38,11 @@ dependencies = [
   "pydantic>=2.8",
   "PyYAML>=6.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/JasonZQH/CURATOR"
+Repository = "https://github.com/JasonZQH/CURATOR"
+Issues = "https://github.com/JasonZQH/CURATOR/issues"
 
 [project.scripts]
 curator = "curator.cli:app"
