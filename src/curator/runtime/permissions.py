@@ -42,13 +42,16 @@ def claude_permission_args(policy: ActionPolicy, slot: str | None) -> list[str]:
 
 
 def codex_sandbox_args(policy: ActionPolicy, slot: str | None) -> list[str]:
-    """Return Codex CLI sandbox flags derived from the action policy."""
+    """Return Codex CLI sandbox flags derived from the action policy.
+
+    `codex exec` is non-interactive and has no --ask-for-approval flag; the
+    sandbox mode alone governs what model-generated commands may do. Writer
+    slots get workspace-write; reviewer slots stay read-only.
+    """
     sandbox = "read-only" if _is_reviewer(slot) else "workspace-write"
     return [
         "--sandbox",
         sandbox,
-        "--ask-for-approval",
-        "never",
         "--cd",
         str(policy.project_root),
     ]

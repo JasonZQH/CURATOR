@@ -22,6 +22,7 @@ def phase0_proposed_files(paths: CuratorPaths) -> list[Path]:
         paths.role_memory_file(RoleName.PM),
         paths.role_memory_file(RoleName.ENGINEER),
         paths.role_memory_file(RoleName.QA),
+        paths.curator_dir / ".gitignore",
         paths.database,
     ]
 

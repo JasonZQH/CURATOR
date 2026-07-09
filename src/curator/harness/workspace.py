@@ -52,15 +52,37 @@ def _is_git_repo(project_root: Path) -> bool:
     return result.returncode == 0 and result.stdout.strip() == "true"
 
 
+def _porcelain_path(line: str) -> str:
+    """Return the file path from one `git status --porcelain` line."""
+    # Format: "XY <path>", with renames written "XY old -> new".
+    path = line[3:].strip() if len(line) > 3 else line.strip()
+    if " -> " in path:
+        path = path.split(" -> ", 1)[1]
+    return path.strip('"')
+
+
+def _is_curator_state(path: str) -> bool:
+    """Return whether a status path is Curator's own local state directory."""
+    return path == ".curator" or path.startswith(".curator/")
+
+
 def capture_baseline(project_root: Path | str) -> WorkspaceBaseline:
-    """Record the git HEAD and cleanliness before a writer run."""
+    """Record the git HEAD and cleanliness before a writer run.
+
+    Curator's own `.curator/` state directory is excluded from the cleanliness
+    check so the tool never blocks a writer on the state it just created.
+    """
     root = Path(project_root)
     if not _is_git_repo(root):
         return WorkspaceBaseline(is_git_repo=False, head=None, clean=True)
 
     head = _git(root, "rev-parse", "HEAD")
     status = _git(root, "status", "--porcelain")
-    entries = [line for line in status.stdout.splitlines() if line.strip()]
+    entries = [
+        line
+        for line in status.stdout.splitlines()
+        if line.strip() and not _is_curator_state(_porcelain_path(line))
+    ]
     return WorkspaceBaseline(
         is_git_repo=True,
         head=head.stdout.strip() or None,

@@ -88,8 +88,13 @@ def test_claude_tool_lists_are_comma_separated_single_args(tmp_path):
 def test_codex_sandbox_args_differ_by_slot(tmp_path):
     """Verify writer slots get workspace-write and reviewers read-only."""
     policy = ActionPolicy.for_project(tmp_path)
-    assert "workspace-write" in codex_sandbox_args(policy, "writer")
-    assert "read-only" in codex_sandbox_args(policy, "reviewer")
+    writer = codex_sandbox_args(policy, "writer")
+    reviewer = codex_sandbox_args(policy, "reviewer")
+    assert "workspace-write" in writer
+    assert "read-only" in reviewer
+    # `codex exec` 0.143.0 has no --ask-for-approval flag; it must not be emitted.
+    assert "--ask-for-approval" not in writer
+    assert "--ask-for-approval" not in reviewer
 
 
 def test_claude_driver_build_argv_includes_stream_json(tmp_path):
@@ -385,3 +390,25 @@ def _bind_writer_to_codex(connection) -> None:
             updated_at=now,
         ),
     )
+
+
+def test_capture_baseline_ignores_curator_state_dir(tmp_path):
+    """Verify Curator's own .curator/ state never marks the workspace dirty."""
+    if _git(tmp_path, "init").returncode != 0:
+        pytest.skip("git is not available")
+    _git(tmp_path, "config", "user.email", "test@example.com")
+    _git(tmp_path, "config", "user.name", "Test")
+    _git(tmp_path, "commit", "--allow-empty", "-m", "init")
+
+    # Simulate `curator init` creating local state in the target repo.
+    (tmp_path / ".curator").mkdir()
+    (tmp_path / ".curator" / "curator.sqlite").write_text("x")
+
+    baseline = capture_baseline(tmp_path)
+    assert baseline.is_git_repo
+    assert baseline.clean  # .curator/ must not count as a dirty workspace
+
+    # A real source change still trips the guard.
+    (tmp_path / "app.py").write_text("print('x')\n")
+    dirty = capture_baseline(tmp_path)
+    assert not dirty.clean
