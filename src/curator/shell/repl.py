@@ -28,7 +28,10 @@ from curator.core.schema import (
     RoleProviderBindingRecord,
     WorkflowSnapshot,
 )
+from curator.diagnostics.doctor import inspect_project_health
+from curator.diagnostics.preflight import render_preflight, run_preflight
 from curator.diagnostics.status import inspect_project_status
+from curator.shell.banner import render_banner
 from curator.goals.store import accept_goal, propose_goal, save_goal
 from curator.nodes.inspection import (
     current_node,
@@ -38,6 +41,7 @@ from curator.nodes.inspection import (
 )
 from curator.rendering.terminal import (
     render_contract_validation_report,
+    render_doctor_report,
     render_status_report,
 )
 from curator.runtime.queue import tick_work_queue
@@ -188,6 +192,7 @@ def _help_text(full: bool = False) -> str:
                 "- /evidence: show latest run evidence refs",
                 "- /memory: show distilled runtime memory lessons",
                 "- /status: show project status",
+                "- /doctor: check project health and environment",
                 "- /validate: validate role contracts",
                 "- /quit: exit",
             ]
@@ -266,6 +271,22 @@ def _handle_status(state: ShellState) -> ShellResponse:
     if shell_step is not None:
         report = replace(report, next_step=shell_step)
     return ShellResponse(render_status_report(report))
+
+
+def _handle_doctor(state: ShellState) -> ShellResponse:
+    """Render project health plus environment preflight for the shell."""
+    report = inspect_project_health(state.project_root)
+    shell_step = _SHELL_NEXT_STEPS.get(report.recommended_next_step)
+    if shell_step is not None:
+        report = replace(report, recommended_next_step=shell_step)
+    return ShellResponse(
+        "\n\n".join(
+            [
+                render_doctor_report(report),
+                render_preflight(run_preflight(state.project_root)),
+            ]
+        )
+    )
 
 
 def _handle_validate(state: ShellState) -> ShellResponse:
@@ -725,6 +746,8 @@ def _handle_slash_command(state: ShellState, text: str) -> ShellResponse:
         return ShellResponse(_help_text(full=True))
     if text == "/status":
         return _handle_status(state)
+    if text == "/doctor":
+        return _handle_doctor(state)
     if text == "/validate":
         return _handle_validate(state)
     if text == "/node list":
@@ -781,7 +804,7 @@ def _handle_slash_command(state: ShellState, text: str) -> ShellResponse:
 
 
 _KNOWN_SLASH_ROOTS = (
-    "/help", "/quit", "/init", "/status", "/validate", "/node", "/goal",
+    "/help", "/quit", "/init", "/status", "/doctor", "/validate", "/node", "/goal",
     "/history", "/session", "/workbench", "/agents", "/providers",
     "/provider", "/agent", "/queue", "/approvals", "/approve", "/reject",
     "/evidence", "/memory", "/resume", "/revise", "/gate", "/cancel",
@@ -1194,9 +1217,30 @@ def _offer_first_run_init(project_root: Path) -> None:
         print(apply_first_run_init(project_root))
 
 
+def _should_run_preflight() -> bool:
+    """Return whether startup preflight probes should run.
+
+    Interactive terminals always get the preflight; pipes and tests skip
+    the subprocess probes unless CURATOR_PREFLIGHT=force is set.
+    """
+    import os
+    import sys
+
+    if os.environ.get("CURATOR_PREFLIGHT") == "force":
+        return True
+    if os.environ.get("CURATOR_PREFLIGHT") == "skip":
+        return False
+    return sys.stdin.isatty()
+
+
 def run_interactive_shell(project_root: Path, gate: bool = True) -> None:
     """Run the blocking stdin/stdout Curator shell."""
     state = ShellState(project_root=project_root, gate_mode=gate)
+    print(render_banner(project_root))
+    print()
+    if _should_run_preflight():
+        print(render_preflight(run_preflight(project_root)))
+        print()
     _offer_first_run_init(project_root)
     print(build_welcome_text(project_root))
     while not state.should_exit:

@@ -28,15 +28,16 @@ def test_provider_list_maps_to_providers_view():
 
 
 def test_single_word_subcommands_map_to_slash_commands():
-    """Verify bare init/status/help map to their shell commands."""
+    """Verify bare init/status/help/doctor map to their shell commands."""
     assert detect_cli_command("init").slash_equivalent == "/init"
     assert detect_cli_command("status").slash_equivalent == "/status"
     assert detect_cli_command("help").slash_equivalent == "/help"
+    assert detect_cli_command("curator doctor").slash_equivalent == "/doctor"
 
 
 def test_terminal_only_commands_are_flagged_without_slash_equivalent():
-    """Verify reset/doctor/contract validate are marked terminal-only."""
-    for text in ("curator reset", "doctor", "curator contract validate"):
+    """Verify reset/contract validate are marked terminal-only."""
+    for text in ("curator reset", "curator contract validate"):
         intent = detect_cli_command(text)
         assert intent is not None, text
         assert intent.slash_equivalent is None

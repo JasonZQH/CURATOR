@@ -100,8 +100,57 @@ def test_bare_curator_opens_natural_language_shell(tmp_path, monkeypatch):
     result = runner.invoke(app, [], input="/quit\n")
 
     assert result.exit_code == 0
-    assert "Curator" in result.stdout
+    assert "curator v0.1.0" in result.stdout
     assert "Type what you want to work on" in result.stdout
+
+
+def test_bare_curator_shows_banner_identity(tmp_path, monkeypatch):
+    """Verify startup prints the ASCII banner with version and path."""
+    runner = CliRunner()
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, [], input="/quit\n")
+
+    assert result.exit_code == 0
+    assert "curator v0.1.0" in result.stdout
+    assert "____" in result.stdout
+
+
+def test_shell_startup_preflight_can_be_forced(tmp_path, monkeypatch):
+    """Verify CURATOR_PREFLIGHT=force runs startup checks in pipes."""
+    runner = CliRunner()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("CURATOR_PREFLIGHT", "force")
+
+    result = runner.invoke(app, [], input="/quit\n")
+
+    assert result.exit_code == 0
+    assert "Preflight:" in result.stdout
+    assert "Python" in result.stdout
+
+
+def test_shell_doctor_command_renders_health_and_preflight(tmp_path, monkeypatch):
+    """Verify /doctor reports project health plus environment checks."""
+    runner = CliRunner()
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, [], input="/doctor\n/quit\n")
+
+    assert result.exit_code == 0
+    assert "Curator doctor" in result.stdout
+    assert "Preflight:" in result.stdout
+    assert "Recommended next step: /init" in result.stdout
+
+
+def test_curator_doctor_includes_preflight(tmp_path, monkeypatch):
+    """Verify the terminal doctor command appends the preflight report."""
+    runner = CliRunner()
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["doctor"])
+
+    assert result.exit_code == 0
+    assert "Preflight:" in result.stdout
 
 
 def test_shell_setup_mode_refuses_natural_language_without_writes(tmp_path, monkeypatch):
