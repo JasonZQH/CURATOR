@@ -16,6 +16,7 @@ from curator.init.reset import (
     reset_curator_state,
 )
 from curator.diagnostics.doctor import inspect_project_health
+from curator.diagnostics.preflight import render_preflight, run_preflight
 from curator.diagnostics.status import inspect_project_status
 from curator.rendering.terminal import (
     render_contract_validation_report,
@@ -183,7 +184,10 @@ def reset_command(
 @app.command("doctor")
 def doctor_command() -> None:
     """Inspect local Curator setup without changing project state."""
-    typer.echo(render_doctor_report(inspect_project_health(Path.cwd())))
+    root = Path.cwd()
+    typer.echo(render_doctor_report(inspect_project_health(root)))
+    typer.echo("")
+    typer.echo(render_preflight(run_preflight(root)))
 
 
 @app.command("status")

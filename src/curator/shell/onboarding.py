@@ -3,7 +3,10 @@
 from pathlib import Path
 
 from curator.core.paths import build_curator_paths
-from curator.providers.detect import detect_available_providers, provider_setup_hint
+from curator.providers.detect import (
+    detect_available_providers,
+    provider_setup_hint,
+)
 from curator.providers.profiles import RuntimeMode, resolve_runtime_mode
 from curator.state.db import connect_database, initialize_database
 
@@ -58,19 +61,35 @@ def _next_action(project_root: Path | str, mode: RuntimeMode) -> str:
     return "Type what you want to work on."
 
 
+def _open_pause_exists(project_root: Path | str) -> bool:
+    """Return whether an open pause survives from an earlier session."""
+    paths = build_curator_paths(project_root)
+    if not paths.database.exists():
+        return False
+    from curator.state.repositories import load_latest_pause_record
+
+    connection = connect_database(paths.database)
+    try:
+        initialize_database(connection)
+        return load_latest_pause_record(connection) is not None
+    finally:
+        connection.close()
+
+
 def build_welcome_text(project_root: Path | str) -> str:
-    """Return the mode-aware interactive shell welcome text."""
+    """Return the mode-aware interactive shell welcome text.
+
+    The product banner and preflight report print above this text, so it
+    stays down to mode, next action, and open-pause guidance.
+    """
     mode = resolve_mode_for_project(project_root)
-    detected = detect_available_providers(project_root)
-    detail = mode.detail
-    if mode.label == "setup" and detected:
-        names = ", ".join(provider.value for provider in detected)
-        detail = f"{mode.detail}; detected CLIs: {names}"
-    return "\n".join(
-        [
-            f"Curator — {Path(project_root).name}",
-            f"Mode: {mode.label} ({detail})",
-            f"Next: {_next_action(project_root, mode)}",
-            "Type what you want to work on, or /help.",
-        ]
-    )
+    lines = [
+        f"Mode: {mode.label} ({mode.detail})",
+        f"Next: {_next_action(project_root, mode)}",
+    ]
+    if _open_pause_exists(project_root):
+        lines.append(
+            "A loop is paused — /resume <answer>, /revise <new scope>, or /cancel."
+        )
+    lines.append("Type what you want to work on, or /help.")
+    return "\n".join(lines)

@@ -17,8 +17,8 @@ _SINGLE_WORD_COMMANDS: dict[str, str | None] = {
     "init": "/init",
     "status": "/status",
     "help": "/help",
+    "doctor": "/doctor",
     "reset": None,
-    "doctor": None,
 }
 
 
