@@ -146,8 +146,12 @@ def test_context_package_request_reaches_cli_prompts(tmp_path):
     )
     request = ProviderRunRequest.from_context_package(spec, package)
 
-    claude_prompt = ClaudeCodeDriver(tmp_path, slot="writer").build_argv(spec, request)[2]
-    codex_prompt = CodexCliDriver(tmp_path, slot="writer").build_argv(spec, request)[-1]
+    claude_driver = ClaudeCodeDriver(tmp_path, slot="writer")
+    codex_driver = CodexCliDriver(tmp_path, slot="writer")
+    assert "Fix mobile login layout" not in " ".join(claude_driver.build_argv(spec, request))
+    assert "Fix mobile login layout" not in " ".join(codex_driver.build_argv(spec, request))
+    claude_prompt = claude_driver.build_prompt(spec, request)
+    codex_prompt = codex_driver.build_prompt(spec, request)
 
     for prompt in (claude_prompt, codex_prompt):
         assert "Fix mobile login layout" in prompt
