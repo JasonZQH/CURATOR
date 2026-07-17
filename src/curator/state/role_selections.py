@@ -5,7 +5,7 @@ import sqlite3
 from typing import Any
 
 from curator.core.schema import RoleSelectionRecord
-from curator.state._mapping import fetch_many, json_dumps, json_loads
+from curator.state._mapping import fetch_many, json_dumps, json_loads, maybe_commit
 
 
 def insert_role_selection(
@@ -32,7 +32,7 @@ def insert_role_selection(
             json_dumps(selection.metadata),
         ),
     )
-    connection.commit()
+    maybe_commit(connection)
 
 
 def _map_role_selection(row: sqlite3.Row) -> dict[str, Any]:

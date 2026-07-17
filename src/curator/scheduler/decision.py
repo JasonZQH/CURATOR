@@ -13,7 +13,13 @@ from curator.core.schema import CompiledLoopStep, HarnessRunResult, RoleContract
 from curator.roles.registry import default_role_contracts
 from curator.scheduler.routing import resolve_handoff
 
-_PAUSED_ERROR_KINDS = {"invalid_output", "permission_denied", "timeout", "cancelled"}
+_PAUSED_ERROR_KINDS = {
+    "invalid_output",
+    "permission_denied",
+    "timeout",
+    "cancelled",
+    "provider_unavailable",
+}
 
 
 @dataclass(frozen=True)
@@ -50,8 +56,8 @@ def _failed_response_decision(step: CompiledLoopStep, result: HarnessRunResult) 
             decision=LoopDecisionType.HUMAN_HANDOFF,
             stop_condition=StopCondition.HUMAN_HANDOFF_REQUESTED,
             reason=(
-                f"Provider reported {error_kind} during {step.step_type.value}; "
-                "pausing for user input."
+                f"Provider reported {error_kind} during {step.step_type.value}: "
+                f"{error_message[:500]}; pausing for user input."
             ),
         )
 

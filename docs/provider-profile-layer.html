@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Provider Profile Layer</title>
+    <title>Provider, Agent, and Runtime Identity</title>
     <style>
       body {
         color: #1f2937;
@@ -30,34 +30,37 @@
     </style>
   </head>
   <body>
-    <h1>Provider Profile Layer</h1>
+    <h1>Provider, Agent, and Runtime Identity</h1>
 
     <h2>What</h2>
     <p>
-      The Provider Profile Layer separates role instances such as
-      <code>engineer.1</code> from provider accounts such as
-      <code>codex-work</code> or <code>claude-team</code>. A role instance still
-      represents work capability, while a provider profile represents the
-      execution identity, credential reference, session, and quota state.
+      Phase 0 separates role slots such as <code>writer.default</code> from provider
+      profiles such as <code>codex-work</code> or <code>claude-team</code>. The blueprint
+      makes this boundary explicit with four identities: an <code>Agent</code> is a
+      configured role worker, a <code>Provider</code> is an installed/backend identity,
+      an <code>AgentRuntime</code> is one live process or provider TUI session, and an
+      <code>Execution</code> is the durable task attempt that survives runtime handoff.
     </p>
 
     <h2>How</h2>
     <p>
       Provider profiles are stored in SQLite with a non-secret
-      <code>credential_ref</code>. Role instances bind to profiles through
-      <code>role_provider_bindings</code>. Provider executions can record
-      <code>provider_profile_id</code> and <code>provider_session_id</code> in
-      the provider run ledger.
+      <code>credential_ref</code>. Phase 0 role slots bind to profiles through
+      <code>role_provider_bindings</code>. The target migration adds provider status,
+      capability/version detection, installation records, scoped permissions, runtime
+      handles, heartbeats, and execution-runtime history without exposing credentials
+      in prompts, logs, or shared memory.
     </p>
     <pre><code>/providers
-/agent bind engineer.1 codex-work
-/agent switch engineer.1 claude-team</code></pre>
+/agent bind writer.default codex-work
+/agent switch writer.default claude-team</code></pre>
     <p>
-      The runtime workbench renders provider profile status, latest quota state,
-      and active agent bindings. The scheduler now requires real provider drivers for
-      user work, and provider objects expose <code>provider_name</code>,
-      <code>provider_profile_id</code>, and <code>provider_session_id</code> for
-      ledger attribution.
+      The runtime workbench renders provider profile status, latest quota state, and
+      active slot bindings. The scheduler requires real provider drivers for user work,
+      and provider objects expose <code>provider_name</code>,
+      <code>provider_profile_id</code>, and <code>provider_session_id</code> for ledger
+      attribution. These are Phase 0 compatibility fields, not the complete target
+      runtime registry.
     </p>
     <p>
       Current CLI commands render and switch existing provider profile records.
@@ -68,19 +71,19 @@
 
     <h2>Why</h2>
     <p>
-      Account identity and quota are resource concerns, not role concerns.
-      Keeping them separate lets the scheduler pause or switch provider
-      identities without changing the role model, work queue, or context package
-      reconstruction path.
+      Account identity, capability availability, live process identity, and task
+      business identity are different concerns. Keeping them separate lets the
+      scheduler switch or recover a runtime without changing the task's execution
+      identity, while preserving a complete audit trail of provider and capability use.
     </p>
 
     <h2>Future improvements/considerations/trade-offs</h2>
     <p>
       This version intentionally avoids storing raw credentials and does not call
-      external quota APIs. Future work can add real Codex and Claude adapters,
-      profile setup commands, automatic quota observation, safer credential
-      backends such as Keychain, and scheduler-level work reassignment when a
-      provider profile becomes quota exhausted.
+      external quota APIs. Future work can add Provider Adapter contracts, capability
+      installation/status, Keychain-backed credentials, native TUI/tmux runtimes,
+      heartbeat-based health, and scheduler-level reassignment when a provider or
+      capability is unavailable.
     </p>
   </body>
 </html>

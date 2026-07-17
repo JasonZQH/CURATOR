@@ -23,7 +23,7 @@ from curator.core.schema import (
     RoleProviderBindingRecord,
     WorkItemRecord,
 )
-from curator.state._mapping import fetch_many, fetch_one, iso_or_none, json_dumps, json_loads
+from curator.state._mapping import fetch_many, fetch_one, iso_or_none, json_dumps, json_loads, maybe_commit
 
 
 def insert_discovery_session(
@@ -46,7 +46,7 @@ def insert_discovery_session(
             json_dumps(session.metadata),
         ),
     )
-    connection.commit()
+    maybe_commit(connection)
 
 
 def insert_discussion_turn(
@@ -68,7 +68,7 @@ def insert_discussion_turn(
             json_dumps(turn.metadata),
         ),
     )
-    connection.commit()
+    maybe_commit(connection)
 
 
 def insert_goal_draft(connection: sqlite3.Connection, draft: GoalDraftRecord) -> None:
@@ -91,7 +91,7 @@ def insert_goal_draft(connection: sqlite3.Connection, draft: GoalDraftRecord) ->
             json_dumps(draft.metadata),
         ),
     )
-    connection.commit()
+    maybe_commit(connection)
 
 
 def insert_pause_record(connection: sqlite3.Connection, pause: PauseRecord) -> None:
@@ -119,7 +119,7 @@ def insert_pause_record(connection: sqlite3.Connection, pause: PauseRecord) -> N
             json_dumps(pause.metadata),
         ),
     )
-    connection.commit()
+    maybe_commit(connection)
 
 
 def insert_resume_event(connection: sqlite3.Connection, event: ResumeEventRecord) -> None:
@@ -142,7 +142,7 @@ def insert_resume_event(connection: sqlite3.Connection, event: ResumeEventRecord
             json_dumps(event.metadata),
         ),
     )
-    connection.commit()
+    maybe_commit(connection)
 
 
 def insert_provider_profile(
@@ -167,7 +167,7 @@ def insert_provider_profile(
             json_dumps(profile.metadata),
         ),
     )
-    connection.commit()
+    maybe_commit(connection)
 
 
 def insert_provider_run(connection: sqlite3.Connection, run: ProviderRunRecord) -> None:
@@ -199,7 +199,7 @@ def insert_provider_run(connection: sqlite3.Connection, run: ProviderRunRecord) 
             json_dumps(run.metadata),
         ),
     )
-    connection.commit()
+    maybe_commit(connection)
 
 
 def insert_provider_session(
@@ -221,7 +221,7 @@ def insert_provider_session(
             json_dumps(session.metadata),
         ),
     )
-    connection.commit()
+    maybe_commit(connection)
 
 
 def insert_quota_state(connection: sqlite3.Connection, quota: QuotaStateRecord) -> None:
@@ -243,7 +243,7 @@ def insert_quota_state(connection: sqlite3.Connection, quota: QuotaStateRecord) 
             json_dumps(quota.metadata),
         ),
     )
-    connection.commit()
+    maybe_commit(connection)
 
 
 def insert_context_package(
@@ -269,7 +269,7 @@ def insert_context_package(
             json_dumps(package.metadata),
         ),
     )
-    connection.commit()
+    maybe_commit(connection)
 
 
 def insert_memory_entry(connection: sqlite3.Connection, entry: MemoryEntryRecord) -> None:
@@ -293,7 +293,7 @@ def insert_memory_entry(connection: sqlite3.Connection, entry: MemoryEntryRecord
             json_dumps(entry.metadata),
         ),
     )
-    connection.commit()
+    maybe_commit(connection)
 
 
 def _map_memory_entry(row: sqlite3.Row) -> dict[str, Any]:
@@ -361,7 +361,7 @@ def insert_role_instance(connection: sqlite3.Connection, role: RoleInstanceRecor
             json_dumps(role.metadata),
         ),
     )
-    connection.commit()
+    maybe_commit(connection)
 
 
 def insert_role_provider_binding(
@@ -394,7 +394,7 @@ def insert_role_provider_binding(
             json_dumps(binding.metadata),
         ),
     )
-    connection.commit()
+    maybe_commit(connection)
 
 
 def insert_work_item(connection: sqlite3.Connection, item: WorkItemRecord) -> None:
@@ -422,7 +422,7 @@ def insert_work_item(connection: sqlite3.Connection, item: WorkItemRecord) -> No
             json_dumps(item.metadata),
         ),
     )
-    connection.commit()
+    maybe_commit(connection)
 
 
 def insert_assignment(connection: sqlite3.Connection, assignment: AssignmentRecord) -> None:
@@ -446,7 +446,7 @@ def insert_assignment(connection: sqlite3.Connection, assignment: AssignmentReco
             json_dumps(assignment.metadata),
         ),
     )
-    connection.commit()
+    maybe_commit(connection)
 
 
 def insert_approval_request(
@@ -474,7 +474,7 @@ def insert_approval_request(
             json_dumps(approval.metadata),
         ),
     )
-    connection.commit()
+    maybe_commit(connection)
 
 
 def insert_approval_decision(
@@ -498,7 +498,7 @@ def insert_approval_decision(
             json_dumps(decision.metadata),
         ),
     )
-    connection.commit()
+    maybe_commit(connection)
 
 
 def _map_discovery_session(row: sqlite3.Row) -> dict[str, Any]:

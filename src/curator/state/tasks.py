@@ -4,7 +4,7 @@ import sqlite3
 from typing import Any
 
 from curator.core.schema import TaskRecord
-from curator.state._mapping import fetch_many, iso_or_none, json_dumps, json_loads
+from curator.state._mapping import fetch_many, iso_or_none, json_dumps, json_loads, maybe_commit
 
 
 def insert_task(connection: sqlite3.Connection, task: TaskRecord) -> None:
@@ -27,7 +27,7 @@ def insert_task(connection: sqlite3.Connection, task: TaskRecord) -> None:
             json_dumps(task.metadata),
         ),
     )
-    connection.commit()
+    maybe_commit(connection)
 
 
 def _map_task(row: sqlite3.Row) -> dict[str, Any]:

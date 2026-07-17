@@ -3,67 +3,94 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Curator Orchestration</title>
+  <title>Curator Runtime Boundary and Blueprint Alignment</title>
 </head>
 <body>
   <main>
-    <h1>Curator Orchestration</h1>
+    <h1>Curator Runtime Boundary and Blueprint Alignment</h1>
 
     <section id="what">
       <h2>What</h2>
       <p>
-        Curator orchestration turns an accepted goal into a durable workflow session.
-        The implemented path is writer provider, deterministic verifier, fresh-context
-        reviewer provider, and human confirmation gate. Provider runs are ledgered with
-        provider identity, context package id, events, responses, evidence, and scheduler
-        decisions.
+        The repository currently implements a local Phase 0 control plane: an accepted
+        goal becomes a durable SQLite workflow session containing a writer run,
+        deterministic verification, a fresh-context review, and a human confirmation
+        gate. The Excalidraw blueprint describes the next runtime model, not a claim that
+        the current branch already has a task DAG or concurrent workers.
       </p>
     </section>
 
     <section id="how">
       <h2>How</h2>
+      <h2>Current Phase 0 path</h2>
       <pre><code>shell/repl.py
-  - records discussion, approval, provider setup commands, resume input
+  - records discussion, approval, provider setup commands, and resume input
 app.py
   - creates accepted-goal workflow sessions
+loops/compiler.py
+  - compiles the fixed single-writer delivery template
 scheduler/engine.py
-  - builds context packages
+  - builds context packages and runs the sequential plan
   - resolves provider drivers from slot bindings
   - pauses on missing provider, dirty workspace, provider handoff, or missing verification
 providers/claude_code.py and providers/codex_cli.py
-  - render context package requests into real CLI prompts
-  - stream events and capture workspace evidence
+  - render context packages into real CLI prompts
+  - stream provider events and capture workspace evidence
 harness/verifier.py
   - discovers project verification commands
-  - records verification evidence
+  - records deterministic verification evidence
 harness/workspace.py
-  - requires clean git baseline for writer runs
+  - requires a clean git baseline for writer runs
   - records tracked diff and untracked files after provider execution</code></pre>
+      <h2>Blueprint target boundary</h2>
       <p>
-        Provider setup accepts only <code>claude-code</code> and <code>codex</code>.
+        The target separates business execution from a provider session. A durable
+        <code>Execution</code> owns one task attempt; every provider process or native
+        TUI session is an <code>AgentRuntime</code> and is recorded by an
+        <code>ExecutionRuntime</code>. A runtime handoff therefore keeps the same
+        execution and attempt number while appending a new runtime sequence. A user
+        retry creates a new execution linked by <code>retry_of_execution_id</code> and
+        preserves the interrupted record.
+      </p>
+      <p>
+        The target scheduler owns Project, Session, Goal, Task, Dependency, Agent,
+        Provider, Capability, Artifact, Memory, Approval, lease, heartbeat, and event
+        state. It may run independent ready tasks in parallel only after workspace
+        ownership, permission scope, concurrency limits, and recovery semantics exist.
+        Control Desk is the inspection/control surface; the concrete Claude Code or
+        Codex TUI remains the native execution surface.
+      </p>
+      <p>
+        Provider setup accepts only <code>claude-code</code> and <code>codex</code> in
+        Phase 0.
         Detection requires the CLI binary to exist and <code>--version</code> to exit
-        successfully. Broken CLIs are not persisted as active provider profiles.
+        successfully. Broken CLIs are not persisted as active provider profiles. The
+        blueprint's capability detection, authentication health, version compatibility,
+        installation registry, and native TUI lifecycle remain V1 work.
       </p>
     </section>
 
     <section id="why">
       <h2>Why</h2>
       <p>
-        The orchestration boundary makes real provider behavior auditable. The scheduler
-        never assumes success from a missing provider, empty verifier, or pre-existing
-        dirty workspace. This gives users a basic reliable interaction standard: visible
-        setup requirements, typed failures, deterministic verification, inspectable
-        evidence, and explicit resume choices.
+        The boundary makes real provider behavior auditable without pretending that a
+        provider conversation is the system of record. Phase 0 already makes setup
+        requirements, typed failures, verification evidence, pauses, and resume choices
+        visible. The blueprint extends the same principle to task state transitions,
+        capability invocations, approvals, artifacts, runtime leases, heartbeats, and
+        handoff snapshots.
       </p>
     </section>
 
     <section id="future">
       <h2>Future improvements/considerations/trade-offs</h2>
       <ul>
-        <li>Support provider-specific structured result parsing for verification commands.</li>
-        <li>Add provider health scoring before automatic writer/reviewer selection.</li>
-        <li>Introduce explicit development fixtures without exposing them as user providers.</li>
-        <li>Offer a guarded dirty-workspace override with clear evidence partitioning.</li>
+        <li>Introduce the canonical Project/Goal/Task/Execution schema beside the Phase 0 ledger.</li>
+        <li>Add append-only events, worker leases, heartbeats, restart recovery, and bounded retry policy.</li>
+        <li>Add filesystem-backed artifact and memory manifests; keep large logs and patches out of SQLite.</li>
+        <li>Define Provider Adapter and shell adapter contracts before adding tmux, Ghostty, or Warp integration.</li>
+        <li>Add capability installation/status records and STRICT, BALANCED, AUTONOMOUS, and FULL_ACCESS policy evaluation.</li>
+        <li>Only then enable DAG scheduling and up to four concurrent local workers.</li>
       </ul>
     </section>
   </main>

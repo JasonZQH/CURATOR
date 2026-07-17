@@ -32,15 +32,19 @@ class CodexCliDriver(SubprocessDriver):
         # writer dispatch); the driver just records the baseline for diffing.
         self._baselines[spec.id] = capture_baseline(self.project_root)
         policy = ActionPolicy.for_project(self.project_root)
-        prompt = render_prompt(request, self.slot)
+        _ = request
         return [
             "codex",
             "exec",
             "--json",
             "--skip-git-repo-check",
             *codex_sandbox_args(policy, self.slot),
-            prompt,
         ]
+
+    def build_prompt(self, spec: HarnessRunSpec, request: ProviderRunRequest) -> str:
+        """Render the context package prompt for Codex stdin."""
+        _ = spec
+        return render_prompt(request, self.slot)
 
     def parse_event(
         self, line: str, provider_run_id: str, sequence: int
@@ -70,7 +74,7 @@ class CodexCliDriver(SubprocessDriver):
                 kind=ProviderEventKind.OUTPUT_CHUNK,
                 provider_run_id=provider_run_id,
                 sequence=sequence,
-                payload={"event": event_type},
+                    payload={"event": event_type, "text": str(text)[:4096]},
             )
         if event_type in {"turn.completed", "turn.failed"}:
             return ProviderEvent(

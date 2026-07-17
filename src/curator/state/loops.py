@@ -4,7 +4,8 @@ import sqlite3
 from typing import Any
 
 from curator.core.schema import LoopDecisionRecord, LoopIterationRecord, LoopRunRecord
-from curator.state._mapping import fetch_many, fetch_one, iso_or_none, json_dumps, json_loads
+from curator.core.enums import LoopStatus
+from curator.state._mapping import fetch_many, fetch_one, iso_or_none, json_dumps, json_loads, maybe_commit
 
 
 def insert_loop_run(connection: sqlite3.Connection, loop_run: LoopRunRecord) -> None:
@@ -28,7 +29,7 @@ def insert_loop_run(connection: sqlite3.Connection, loop_run: LoopRunRecord) -> 
             json_dumps(loop_run.metadata),
         ),
     )
-    connection.commit()
+    maybe_commit(connection)
 
 
 def insert_loop_iteration(
@@ -56,7 +57,7 @@ def insert_loop_iteration(
             json_dumps(iteration.metadata),
         ),
     )
-    connection.commit()
+    maybe_commit(connection)
 
 
 def insert_loop_decision(
@@ -81,7 +82,7 @@ def insert_loop_decision(
             json_dumps(decision.metadata),
         ),
     )
-    connection.commit()
+    maybe_commit(connection)
 
 
 def _map_loop_run(row: sqlite3.Row) -> dict[str, Any]:
@@ -149,6 +150,20 @@ def load_loop_runs_for_session(
         connection,
         "select * from loop_runs where session_id = ? order by created_at, id",
         (session_id,),
+        LoopRunRecord,
+        _map_loop_run,
+    )
+
+
+def load_loop_runs_by_status(
+    connection: sqlite3.Connection, status: LoopStatus | str
+) -> list[LoopRunRecord]:
+    """Load loop runs in one lifecycle status for crash reconciliation."""
+    value = status.value if isinstance(status, LoopStatus) else status
+    return fetch_many(
+        connection,
+        "select * from loop_runs where status = ? order by updated_at, id",
+        (value,),
         LoopRunRecord,
         _map_loop_run,
     )

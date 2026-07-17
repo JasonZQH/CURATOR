@@ -4,7 +4,7 @@ import sqlite3
 from typing import Any
 
 from curator.core.schema import EventRecord
-from curator.state._mapping import fetch_many, json_dumps, json_loads
+from curator.state._mapping import fetch_many, json_dumps, json_loads, maybe_commit
 
 
 def insert_event(connection: sqlite3.Connection, event: EventRecord) -> None:
@@ -24,7 +24,7 @@ def insert_event(connection: sqlite3.Connection, event: EventRecord) -> None:
             json_dumps(event.payload),
         ),
     )
-    connection.commit()
+    maybe_commit(connection)
 
 
 def _map_event(row: sqlite3.Row) -> dict[str, Any]:
