@@ -1,6 +1,7 @@
 """Verify the async subprocess provider driver."""
 
 import asyncio
+import os
 import sys
 import time
 from pathlib import Path
@@ -153,6 +154,25 @@ def test_subprocess_driver_cancellation_terminates_process(tmp_path):
     started = time.monotonic()
     asyncio.run(_cancel_mid_run())
     assert time.monotonic() - started < 15
+
+
+def test_subprocess_driver_kills_descendant_process_group(tmp_path):
+    """Verify timeout cleanup removes a provider child process as well."""
+    with pytest.raises(TimeoutError):
+        _run(ScriptedDriver(tmp_path, "spawn_hang", timeout_seconds=1), [])
+
+    child_pid_path = tmp_path / "child.pid"
+    assert child_pid_path.exists()
+    child_pid = int(child_pid_path.read_text(encoding="utf-8"))
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            os.kill(child_pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.05)
+    else:
+        pytest.fail(f"descendant process {child_pid} survived process-group cleanup")
 
 
 def test_legacy_driver_wraps_sync_providers_with_lifecycle_events(tmp_path):

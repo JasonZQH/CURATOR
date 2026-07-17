@@ -95,6 +95,7 @@ from curator.state.repositories import (
 from curator.runtime.lockfile import ProjectLockedError, project_write_lock
 from curator.scheduler.cancellation import CancellationToken
 from curator.scheduler.recovery import reconcile_project
+from curator.shell.errors import recoverable_error_message
 from curator.team.roles import validate_role_contracts
 from curator.tui.workflow_panel import render_workflow_lines
 
@@ -1153,6 +1154,7 @@ def _handle_resume(state: ShellState, message: str) -> ShellResponse:
     snapshot = resume_goal_loop(
         state.project_root,
         cleaned,
+        on_event=state.emit_event or _print_progress_event,
         cancellation=state.cancellation,
         loop_run_id=loop_run_id,
     )
@@ -1260,8 +1262,8 @@ def _handle_proposal_answer(state: ShellState, stripped: str, lowered: str) -> S
     return ShellResponse(_render_goal_proposal(state.pending_goal))
 
 
-def handle_shell_input(state: ShellState, text: str) -> ShellResponse:
-    """Handle one line of shell input."""
+def _handle_shell_input(state: ShellState, text: str) -> ShellResponse:
+    """Handle one line of shell input inside the guarded dispatch boundary."""
     stripped = text.strip()
     lowered = stripped.lower()
     if not stripped:
@@ -1290,6 +1292,18 @@ def handle_shell_input(state: ShellState, text: str) -> ShellResponse:
         lines.append("Type what you want to work on, or /help.")
         return ShellResponse("\n".join(lines))
     return _handle_natural_language(state, stripped)
+
+
+def handle_shell_input(state: ShellState, text: str) -> ShellResponse:
+    """Handle one line and convert unexpected failures into logged responses."""
+    try:
+        return _handle_shell_input(state, text)
+    except ProjectLockedError as error:
+        return ShellResponse(str(error))
+    except Exception as error:
+        return ShellResponse(
+            recoverable_error_message(state.project_root, "shell input", error)
+        )
 
 
 def _offer_first_run_init(project_root: Path) -> None:
@@ -1337,19 +1351,29 @@ def run_interactive_shell(project_root: Path, gate: bool = True) -> None:
     state = ShellState(project_root=project_root, gate_mode=gate)
     print(render_banner(project_root))
     print()
-    recovered = reconcile_project(project_root)
+    try:
+        recovered = reconcile_project(project_root)
+    except Exception as error:
+        print(recoverable_error_message(project_root, "startup recovery", error))
+        recovered = 0
     if recovered:
         print(f"Recovered {recovered} interrupted run(s).")
     if _should_run_preflight():
-        print(render_preflight(run_preflight(project_root)))
+        try:
+            print(render_preflight(run_preflight(project_root)))
+        except Exception as error:
+            print(recoverable_error_message(project_root, "startup preflight", error))
         print()
     _offer_first_run_init(project_root)
     print(build_welcome_text(project_root))
     history_enabled = sys.stdin.isatty()
     try:
         if history_enabled:
-            load_shell_history(project_root)
-            configure_shell_completion()
+            try:
+                load_shell_history(project_root)
+                configure_shell_completion()
+            except Exception as error:
+                print(recoverable_error_message(project_root, "shell history", error))
         while not state.should_exit:
             try:
                 line = read_multiline(_prompt_prefix(state))
@@ -1362,4 +1386,7 @@ def run_interactive_shell(project_root: Path, gate: bool = True) -> None:
                 break
     finally:
         if history_enabled:
-            save_shell_history(project_root)
+            try:
+                save_shell_history(project_root)
+            except Exception as error:
+                print(recoverable_error_message(project_root, "shell history", error))

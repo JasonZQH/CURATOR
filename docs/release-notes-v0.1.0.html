@@ -21,6 +21,7 @@
         <li>机器重启后，reconcile 会把残留 execution 标为 FAILED，生成新的 interrupted pause attempt，随后可用 <code>/resume</code> 继续。</li>
         <li>Ctrl+C/Esc、timeout 和 provider error 会记录 stopped_by/stop_reason；provider CLI 以独立进程组运行并清理进程组。</li>
         <li>prompt/context 通过 stdin 传输，不放入 argv；实时 OUTPUT_CHUNK 以最多 4 KiB 的 text 事件写入 ledger，transcript 仅是 UI 临时输出、不做回放。</li>
+        <li>TUI 支持历史、Tab 补全、Shift+Enter/Ctrl+J 续行、动画 spinner/耗时和语义色彩；暂停问题直接显示，并在启动异常或用户中断后写入脱敏的 <code>.curator/errors.log</code>。</li>
       </ul>
       <h2>Why</h2>
       <p>
@@ -30,7 +31,7 @@
       </p>
       <h2>Future improvements/considerations/trade-offs</h2>
       <ul>
-        <li>已知限制：串行单写入者；flock 仅本地盘；mock 路径取消有延迟；TUI 粘贴多行会折叠为一次提交。</li>
+        <li>已知限制：串行单写入者；flock 仅本地盘；mock 路径取消有延迟；TUI 粘贴多行会折叠为一次提交，需用 Shift+Enter/Ctrl+J 进行显式续行。</li>
         <li>provider 要求：本地可执行且已登录的 Claude Code 或 Codex CLI；缺失 provider 会阻塞或暂停，不会伪造成功。</li>
         <li>平台边界：macOS 主测、Linux CI、Windows 未支持；killpg 对 provider 自建进程组的逃逸仍需实际 CLI 版本 smoke。</li>
         <li>V1 不属于本发布：DAG、并行 worker、native Provider TUI、Capability Registry 和 Runtime Handoff。</li>

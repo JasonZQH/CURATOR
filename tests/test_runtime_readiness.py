@@ -31,6 +31,7 @@ from curator.state.repositories import (
     load_provider_runs_for_run,
     load_resume_events_for_pause,
 )
+from curator.tui.workflow_panel import render_workflow_lines
 
 
 class AlwaysFailValidationProvider(CodingDeliveryFakeProvider):
@@ -117,8 +118,10 @@ def test_shell_accepts_recovered_goal_draft_after_restart(tmp_path, monkeypatch)
     assert "goal-fix-mobile-login-layout-rev-001" in current.text
 
 
-def test_paused_node_and_resume_are_durable_across_shell_restart(tmp_path):
+def test_paused_node_and_resume_are_durable_across_shell_restart(tmp_path, monkeypatch):
     """Verify paused node context and resume answers are recovered from SQLite."""
+    enable_live_mode(tmp_path)
+    install_fake_claude(tmp_path, monkeypatch)
     revision_id = _accepted_goal_revision(tmp_path)
     snapshot = start_goal_loop(
         tmp_path,
@@ -132,8 +135,9 @@ def test_paused_node_and_resume_are_durable_across_shell_restart(tmp_path):
         ShellState(project_root=tmp_path),
         "Please keep scope and repair only the failing validation.",
     )
+    resume_events_seen = []
     resume_response = handle_shell_input(
-        ShellState(project_root=tmp_path),
+        ShellState(project_root=tmp_path, emit_event=resume_events_seen.append),
         "/resume Please keep scope and repair only the failing validation.",
     )
 
@@ -158,6 +162,23 @@ def test_paused_node_and_resume_are_durable_across_shell_restart(tmp_path):
     assert pauses[0].status.value == "resolved"
     assert resume_events[0].message == "Please keep scope and repair only the failing validation."
     assert len(recovered.loop_iterations) >= len(snapshot.loop_iterations)
+    assert resume_events_seen
+
+
+def test_paused_snapshot_renders_question_immediately(tmp_path):
+    """Verify a paused run response includes the actionable question directly."""
+    revision_id = _accepted_goal_revision(tmp_path)
+    snapshot = start_goal_loop(
+        tmp_path,
+        revision_id,
+        provider=AlwaysFailValidationProvider(),
+    )
+
+    lines = render_workflow_lines(snapshot)
+
+    assert "Paused:" in lines
+    assert "- Question: How should Curator proceed from this paused node?" in lines
+    assert "- Continue with: /resume <message>" in lines
 
 
 def test_revise_command_creates_revised_goal_draft_from_pause(tmp_path):
@@ -480,8 +501,8 @@ def test_provider_failure_matrix_records_cancelled_timeout_and_permission(tmp_pa
         assert "pausing for user input" in pause.reason
 
 
-def test_provider_failure_matrix_records_provider_unavailable(tmp_path):
-    """Verify unavailable providers fail with typed ledger entries."""
+def test_provider_failure_matrix_stops_on_untyped_runtime_error(tmp_path):
+    """Verify an untyped provider bug fails instead of becoming a pause."""
 
     class UnavailableProvider:
         """Raise a generic provider availability failure."""
@@ -501,10 +522,10 @@ def test_provider_failure_matrix_records_provider_unavailable(tmp_path):
     pause = load_latest_pause_record(connection, loop_run.id)
     connection.close()
 
-    assert loop_run.status.value == "paused"
+    assert loop_run.status.value == "failed"
     assert provider_runs[0].error_kind is ProviderErrorKind.PROVIDER_UNAVAILABLE
-    assert provider_runs[0].metadata["scheduler_decision"] == "human_handoff"
-    assert pause is not None
+    assert provider_runs[0].metadata["scheduler_decision"] == "stop_failed"
+    assert pause is None
 
 
 def test_workbench_surfaces_paused_provider_failure(tmp_path):

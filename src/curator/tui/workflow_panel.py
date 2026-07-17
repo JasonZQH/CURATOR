@@ -68,6 +68,18 @@ def render_workflow_lines(snapshot: WorkflowSnapshot) -> list[str]:
     if stop_line is not None:
         lines.append(stop_line)
 
+    if snapshot.pause_records:
+        pause = snapshot.pause_records[-1]
+        lines.extend(
+            [
+                "Paused:",
+                f"- Reason: {pause.reason}",
+                f"- Question: {pause.question}",
+                f"- Requested input: {pause.requested_input}",
+                "- Continue with: /resume <message>",
+            ]
+        )
+
     lines.append(f"Evidence: {len(snapshot.evidence_refs)}")
     return lines
 

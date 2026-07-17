@@ -2,6 +2,9 @@
 
 import argparse
 import json
+import os
+from pathlib import Path
+import subprocess
 import sys
 import time
 
@@ -29,6 +32,19 @@ def main() -> int:
         return 3
     if args.scenario == "hang":
         print(json.dumps({"kind": "tool_call", "label": "thinking"}), flush=True)
+        time.sleep(60)
+        return 0
+    if args.scenario == "spawn_hang":
+        child = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(60)"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        Path("child.pid").write_text(str(child.pid), encoding="utf-8")
+        print(
+            json.dumps({"kind": "tool_call", "label": f"child {os.getpid()}"}),
+            flush=True,
+        )
         time.sleep(60)
         return 0
     return 0

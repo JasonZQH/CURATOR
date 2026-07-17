@@ -4,6 +4,16 @@ from rich.markup import escape
 
 from curator.providers.events import ProviderEvent, ProviderEventKind
 
+_EVENT_STYLES = {
+    ProviderEventKind.STARTED: "cyan",
+    ProviderEventKind.OUTPUT_CHUNK: "white",
+    ProviderEventKind.TOOL_CALL: "yellow",
+    ProviderEventKind.PERMISSION_REQUEST: "magenta",
+    ProviderEventKind.USAGE: "dim",
+    ProviderEventKind.COMPLETED: "green",
+    ProviderEventKind.FAILED: "red",
+}
+
 
 def escape_markup(text: str) -> str:
     """Escape user or provider text before rendering it as Rich markup."""
@@ -11,8 +21,9 @@ def escape_markup(text: str) -> str:
 
 
 def render_provider_event(event: ProviderEvent) -> str:
-    """Render one provider event with escaped labels and output text."""
+    """Render one provider event with escaped text and semantic Rich color."""
+    style = _EVENT_STYLES.get(event.kind, "white")
     label = f" {escape_markup(event.label)}" if event.label else ""
     if event.kind is ProviderEventKind.OUTPUT_CHUNK:
-        return escape_markup(str(event.payload.get("text", "")))
-    return f"[{escape_markup(event.kind.value)}]{label}"
+        return f"[{style}]{escape_markup(str(event.payload.get('text', '')))}[/{style}]"
+    return f"[{style}]{escape_markup(event.kind.value)}{label}[/{style}]"

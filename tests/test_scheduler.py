@@ -383,12 +383,12 @@ def test_run_workflow_stops_failed_when_provider_raises(tmp_path):
     decisions = load_loop_decisions_for_run(connection, loop_run.id)
     tasks = load_tasks_for_session(connection, session_id)
 
-    assert loop_run.status is LoopStatus.PAUSED
+    assert loop_run.status is LoopStatus.FAILED
     assert len(iterations) == 1
     assert iterations[0].status is HarnessStatus.FAILED
-    assert decisions[0].decision is LoopDecisionType.HUMAN_HANDOFF
-    assert decisions[0].stop_condition is StopCondition.HUMAN_HANDOFF_REQUESTED
-    assert tasks[0].status is TaskStatus.DONE
+    assert decisions[0].decision is LoopDecisionType.STOP_FAILED
+    assert decisions[0].stop_condition is StopCondition.PROVIDER_FAILED
+    assert tasks[0].status is TaskStatus.FAILED
 
 
 class RecordingRetryProvider(RetryOnceCodingDeliveryFakeProvider):

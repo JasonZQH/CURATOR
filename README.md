@@ -120,6 +120,9 @@ the sequential Phase 0 behavior above.
 | Learn & inspect | `/memory` · `/history` · `/sessions` · `/status` · `/help` |
 | Terminal | `curator init` · `curator provider add\|list` · `curator reset` · `curator doctor` · `curator status` |
 
+Full-screen TUI also provides Up/Down history, Tab completion, Shift+Enter/Ctrl+J
+continuation lines, animated busy timing, Esc interruption, and two-stage Ctrl+C shutdown.
+
 ## Documentation
 
 | Doc | What it covers |

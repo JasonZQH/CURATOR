@@ -53,7 +53,11 @@ from curator.harness.workspace import (
 )
 from curator.memory.distill import record_decision_memory
 from curator.loops.compiler import compile_coding_delivery_plan
-from curator.providers.contracts import ProviderRunRequest, classify_provider_error
+from curator.providers.contracts import (
+    ProviderCancelledError,
+    ProviderRunRequest,
+    classify_provider_error,
+)
 from curator.providers.redact import redact_error
 from curator.providers.base import Provider
 from curator.providers.driver import ProviderDriver, driver_for_provider
@@ -396,11 +400,17 @@ def _provider_quota_status(provider: Provider) -> str | None:
 
 
 def _pause_reason_for_provider_error(provider_error: Exception) -> str | None:
-    """Return a pause reason for provider errors that need human input."""
+    """Return a pause reason only for known recoverable provider failures."""
     if isinstance(provider_error, ProviderConfigurationError):
         return f"{provider_error} Pausing until a real provider is configured."
     if isinstance(provider_error, WorkspaceDirtyError):
         return f"{provider_error} Pausing so existing changes are not misattributed."
+    if isinstance(provider_error, FileNotFoundError):
+        return f"Provider executable is unavailable: {provider_error}. Pausing for setup."
+    if isinstance(provider_error, ConnectionError):
+        return f"Provider connection is unavailable: {provider_error}. Pausing for setup."
+    if isinstance(provider_error, ProviderCancelledError):
+        return "Provider was cancelled; pausing for user input."
     error_kind = classify_provider_error(provider_error)
     if error_kind.value == "invalid_output":
         return "Provider invalid output; pausing for user input."
@@ -410,7 +420,7 @@ def _pause_reason_for_provider_error(provider_error: Exception) -> str | None:
         return "Provider timed out; pausing for user input."
     if error_kind.value == "cancelled":
         return "Provider was cancelled; pausing for user input."
-    return f"Provider error ({error_kind.value}): {provider_error}; pausing for user input."
+    return None
 
 
 def _pause_record_for_decision(

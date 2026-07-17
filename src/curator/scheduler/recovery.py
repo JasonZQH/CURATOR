@@ -117,7 +117,7 @@ def reconcile(
             (pause for pause in open_pauses if pause.metadata.get("kind") == "interrupted"),
             None,
         )
-        if interrupted_open is not None:
+        if interrupted_open is not None and loop_run.status is LoopStatus.PAUSED:
             continue
         if loop_run.status is LoopStatus.PAUSED and open_pauses:
             continue
