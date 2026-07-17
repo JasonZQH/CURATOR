@@ -206,8 +206,8 @@ def test_decide_runtime_stops_failed_for_failed_provider_response_status():
 
     decision = decide_runtime(step, result)
 
-    assert decision.decision is LoopDecisionType.STOP_FAILED
-    assert decision.stop_condition is StopCondition.PROVIDER_FAILED
+    assert decision.decision is LoopDecisionType.HUMAN_HANDOFF
+    assert decision.stop_condition is StopCondition.HUMAN_HANDOFF_REQUESTED
     assert "quota exhausted" in decision.reason
 
 

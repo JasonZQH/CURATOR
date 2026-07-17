@@ -4,7 +4,7 @@ import sqlite3
 from typing import Any
 
 from curator.core.schema import MessageRecord
-from curator.state._mapping import fetch_many, json_dumps, json_loads
+from curator.state._mapping import fetch_many, json_dumps, json_loads, maybe_commit
 
 
 def insert_message(connection: sqlite3.Connection, message: MessageRecord) -> None:
@@ -26,7 +26,7 @@ def insert_message(connection: sqlite3.Connection, message: MessageRecord) -> No
             json_dumps(message.metadata),
         ),
     )
-    connection.commit()
+    maybe_commit(connection)
 
 
 def _map_message(row: sqlite3.Row) -> dict[str, Any]:

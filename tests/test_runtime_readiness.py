@@ -501,10 +501,10 @@ def test_provider_failure_matrix_records_provider_unavailable(tmp_path):
     pause = load_latest_pause_record(connection, loop_run.id)
     connection.close()
 
-    assert loop_run.status.value == "failed"
+    assert loop_run.status.value == "paused"
     assert provider_runs[0].error_kind is ProviderErrorKind.PROVIDER_UNAVAILABLE
-    assert provider_runs[0].metadata["scheduler_decision"] == "stop_failed"
-    assert pause is None
+    assert provider_runs[0].metadata["scheduler_decision"] == "human_handoff"
+    assert pause is not None
 
 
 def test_workbench_surfaces_paused_provider_failure(tmp_path):

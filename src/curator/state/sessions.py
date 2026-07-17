@@ -4,7 +4,7 @@ import sqlite3
 from typing import Any
 
 from curator.core.schema import SessionRecord
-from curator.state._mapping import fetch_one, json_dumps, json_loads
+from curator.state._mapping import fetch_many, fetch_one, json_dumps, json_loads, maybe_commit
 
 
 def insert_session(connection: sqlite3.Connection, session: SessionRecord) -> None:
@@ -25,7 +25,7 @@ def insert_session(connection: sqlite3.Connection, session: SessionRecord) -> No
             json_dumps(session.metadata),
         ),
     )
-    connection.commit()
+    maybe_commit(connection)
 
 
 def _map_session(row: sqlite3.Row) -> dict[str, Any]:
@@ -58,6 +58,19 @@ def load_latest_session(connection: sqlite3.Connection) -> SessionRecord | None:
         connection,
         "select * from sessions order by updated_at desc, id desc limit 1",
         (),
+        SessionRecord,
+        _map_session,
+    )
+
+
+def load_sessions_for_project(
+    connection: sqlite3.Connection, project_root: str
+) -> list[SessionRecord]:
+    """Load all sessions for one project in newest-first order."""
+    return fetch_many(
+        connection,
+        "select * from sessions where project_root = ? order by created_at desc, id desc",
+        (project_root,),
         SessionRecord,
         _map_session,
     )
