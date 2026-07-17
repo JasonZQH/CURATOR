@@ -8,7 +8,9 @@ from textual.binding import Binding
 from textual.widgets import Input, RichLog, Static
 
 from curator.diagnostics.preflight import render_preflight, run_preflight
-from curator.providers.events import ProviderEvent, ProviderEventKind
+from curator.providers.events import ProviderEvent
+from curator.tui.format import escape_markup, render_provider_event
+from curator.scheduler.recovery import reconcile_project
 from curator.shell.banner import render_banner
 from curator.shell.onboarding import (
     build_welcome_text,
@@ -41,17 +43,23 @@ class CuratorShellApp(App[None]):
     #input { dock: bottom; }
     """
 
-    BINDINGS = [Binding("ctrl+c", "quit", "Quit", priority=True)]
+    BINDINGS = [
+        Binding("ctrl+c", "interrupt", "Interrupt", priority=True),
+        Binding("escape", "interrupt", "Interrupt", priority=True),
+    ]
 
     def __init__(self, project_root: Path | str, gate: bool = True) -> None:
         """Bind the app to one project root and shell state."""
         super().__init__()
         self.state = ShellState(project_root=Path(project_root), gate_mode=gate)
         self.transcript: list[str] = []
+        self._busy = False
+        self._interrupt_count = 0
+        self._startup_ready = not _should_run_preflight()
 
     def compose(self) -> ComposeResult:
         """Compose the log, suggestion bar, input, and status bar."""
-        yield RichLog(id="log", wrap=True, markup=False)
+        yield RichLog(id="log", wrap=True, markup=True)
         yield Static("", id="suggest")
         yield Input(placeholder="Type what you want to work on, or /help", id="input")
         yield Static("", id="status")
@@ -64,27 +72,38 @@ class CuratorShellApp(App[None]):
         if _should_run_preflight():
             self.run_worker(self._startup_preflight, thread=True)
         else:
+            recovered = reconcile_project(self.state.project_root)
+            if recovered:
+                self._write(f"Recovered {recovered} interrupted run(s).")
             self._write(build_welcome_text(self.state.project_root))
+        self.query_one("#input", Input).disabled = not self._startup_ready
         self._refresh_status()
         self.query_one("#input", Input).focus()
 
     def _startup_preflight(self) -> None:
         """Run environment probes off the UI thread and report them."""
+        recovered = reconcile_project(self.state.project_root)
         text = render_preflight(run_preflight(self.state.project_root))
         welcome = build_welcome_text(self.state.project_root)
-        self.call_from_thread(self._write, f"{text}\n\n{welcome}")
+        if recovered:
+            text = f"Recovered {recovered} interrupted run(s).\n\n{text}"
+        self.call_from_thread(self._finish_startup, f"{text}\n\n{welcome}")
+
+    def _finish_startup(self, text: str) -> None:
+        """Mark startup ready and display its diagnostics."""
+        self._startup_ready = True
+        self._write(text)
+        self.query_one("#input", Input).disabled = False
+        self.query_one("#input", Input).focus()
 
     def _write(self, text: str) -> None:
         """Append one block of text to the log and transcript."""
         self.transcript.append(text)
-        self.query_one("#log", RichLog).write(text)
+        self.query_one("#log", RichLog).write(escape_markup(text))
 
     def _emit_provider_event(self, event: ProviderEvent) -> None:
         """Stream one provider progress line into the log."""
-        if event.kind is ProviderEventKind.OUTPUT_CHUNK:
-            return
-        label = f" {event.label}" if event.label else ""
-        self.call_from_thread(self._write, f"  [{event.kind.value}]{label}")
+        self.call_from_thread(self._write, render_provider_event(event))
 
     def _status_text(self) -> str:
         """Build the persistent status line from durable state."""
@@ -131,17 +150,27 @@ class CuratorShellApp(App[None]):
         self.query_one("#input", Input).value = ""
         if not text:
             return
+        if not self._startup_ready:
+            self._write("Startup checks are still running; input is temporarily disabled.")
+            return
+        if self._busy:
+            self._write("Curator is busy — press Esc to interrupt the active run.")
+            return
         self._write(f"› {text}")
         if text == "/setup":
             self._run_wizard()
             return
-        self.run_worker(
-            lambda: self._dispatch(text), thread=True, exclusive=True, group="dispatch"
-        )
+        self._busy = True
+        self.query_one("#input", Input).disabled = True
+        self._write("⠋ Working… (Esc interrupts)")
+        self.run_worker(lambda: self._dispatch(text), thread=True, exclusive=True, group="dispatch")
 
     def _dispatch(self, text: str) -> None:
         """Run one shell input off the UI thread and render the response."""
-        response = handle_shell_input(self.state, text)
+        try:
+            response = handle_shell_input(self.state, text)
+        except Exception as error:
+            response = ShellResponse(f"Curator recovered from an error: {error}")
         self.call_from_thread(self._render_response, response)
 
     def _render_response(self, response: ShellResponse) -> None:
@@ -150,6 +179,24 @@ class CuratorShellApp(App[None]):
             self._write(response.text)
         self._refresh_status()
         if response.should_exit:
+            self.exit()
+        self._busy = False
+        self._interrupt_count = 0
+        self.query_one("#input", Input).disabled = False
+        self.query_one("#input", Input).focus()
+
+    def action_interrupt(self) -> None:
+        """Implement Esc and two-stage Ctrl+C interruption semantics."""
+        if not self._busy:
+            return
+        self._interrupt_count += 1
+        self.state.cancellation.cancel()
+        self._write(
+            "Cancellation requested. Press Ctrl+C again to exit."
+            if self._interrupt_count == 1
+            else "Stopping Curator…"
+        )
+        if self._interrupt_count >= 2:
             self.exit()
 
     def _run_wizard(self) -> None:
