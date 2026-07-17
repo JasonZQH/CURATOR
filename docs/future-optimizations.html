@@ -161,11 +161,13 @@
         unrelated runtime work into one phase.
       </p>
       <div class="callout">
-        <strong>Scope guard:</strong> real provider execution, runtime dynamic role
-        dispatch, executable graph revision, ownership, parallel work, memory learning,
-        and skill runtime are P1/MVP tracks. P0 already has durable pause records,
-        resume events, scope-change draft creation, provider profile records, and action
-        approval gates; those foundations should be extended rather than redesigned.
+        <strong>Scope guard:</strong> the current v0-alpha release remains a local,
+        single-writer workflow. The blueprint is the V1 target: Project/Session/Goal/
+        Task DAGs, Agent and AgentRuntime separation, Provider/Capability registry,
+        append-only events, artifacts and memory manifests, leases/heartbeats, native
+        provider TUI integration, runtime handoff, and bounded parallel workers. These
+        must be documented as migration tracks until the repository implements them;
+        the v0-alpha docs must not imply that they already exist.
       </div>
     </section>
 

@@ -1,6 +1,6 @@
 """Run the Curator natural-language interactive shell."""
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Callable
@@ -89,7 +89,12 @@ from curator.state.repositories import (
     load_provider_binding_for_role,
     load_provider_profile,
     load_role_instances,
+    load_loop_runs_for_session,
+    load_sessions_for_project,
 )
+from curator.runtime.lockfile import ProjectLockedError, project_write_lock
+from curator.scheduler.cancellation import CancellationToken
+from curator.scheduler.recovery import reconcile_project
 from curator.team.roles import validate_role_contracts
 from curator.tui.workflow_panel import render_workflow_lines
 
@@ -104,6 +109,7 @@ class ShellState:
     should_exit: bool = False
     gate_mode: bool = True
     emit_event: Callable[[ProviderEvent], None] | None = None
+    cancellation: CancellationToken = field(default_factory=CancellationToken)
 
 
 @dataclass(frozen=True)
@@ -466,6 +472,14 @@ def _record_goal_approval(
 def _handle_approval_decision(
     state: ShellState, text: str, status: ApprovalStatus
 ) -> ShellResponse:
+    """Apply one approval mutation while holding the project write lock."""
+    with project_write_lock(state.project_root):
+        return _handle_approval_decision_unlocked(state, text, status)
+
+
+def _handle_approval_decision_unlocked(
+    state: ShellState, text: str, status: ApprovalStatus
+) -> ShellResponse:
     """Apply a user decision to one pending approval request."""
     parts = text.split(maxsplit=2)
     if len(parts) < 2:
@@ -645,6 +659,12 @@ def _handle_queue(state: ShellState) -> ShellResponse:
 
 def _handle_queue_tick(state: ShellState) -> ShellResponse:
     """Assign pending durable work to idle role instances."""
+    with project_write_lock(state.project_root):
+        return _handle_queue_tick_unlocked(state)
+
+
+def _handle_queue_tick_unlocked(state: ShellState) -> ShellResponse:
+    """Assign pending durable work while holding the project write lock."""
     connection = _connect_state(state)
     try:
         decisions = tick_work_queue(connection)
@@ -689,6 +709,25 @@ def _handle_session_current(state: ShellState) -> ShellResponse:
             ]
         )
     )
+
+
+def _handle_sessions(state: ShellState) -> ShellResponse:
+    """Render all durable sessions and their latest loop statuses."""
+    if not _database_exists(state):
+        return ShellResponse("Sessions:\n- none")
+    connection = _connect_state(state)
+    try:
+        sessions = load_sessions_for_project(connection, str(state.project_root))
+        lines = ["Sessions:"]
+        for session in sessions:
+            runs = load_loop_runs_for_session(connection, session.id)
+            latest = runs[-1] if runs else None
+            status = latest.status.value if latest is not None else session.status
+            run_id = latest.id if latest is not None else "-"
+            lines.append(f"- {session.id} [{status}] run={run_id}")
+        return ShellResponse("\n".join(lines) if sessions else "Sessions:\n- none")
+    finally:
+        connection.close()
 
 
 def _handle_memory(state: ShellState) -> ShellResponse:
@@ -774,6 +813,8 @@ def _handle_slash_command(state: ShellState, text: str) -> ShellResponse:
         return _handle_history(state)
     if text == "/session current":
         return _handle_session_current(state)
+    if text == "/sessions":
+        return _handle_sessions(state)
     if text == "/workbench":
         return _handle_workbench(state)
     if text == "/agents":
@@ -815,7 +856,7 @@ def _handle_slash_command(state: ShellState, text: str) -> ShellResponse:
 
 KNOWN_SLASH_ROOTS = (
     "/help", "/quit", "/init", "/setup", "/status", "/doctor", "/validate", "/node", "/goal",
-    "/history", "/session", "/workbench", "/agents", "/providers",
+    "/history", "/session", "/sessions", "/workbench", "/agents", "/providers",
     "/provider", "/agent", "/queue", "/approvals", "/approve", "/reject",
     "/evidence", "/memory", "/resume", "/revise", "/gate", "/cancel",
 )
@@ -825,7 +866,7 @@ KNOWN_SLASH_COMMANDS = (
     "/help", "/help all", "/setup", "/init", "/status", "/doctor", "/validate",
     "/goal current", "/goal start", "/goal history", "/node list", "/node current",
     "/resume", "/revise", "/gate on", "/gate off", "/cancel", "/history",
-    "/session current", "/workbench", "/agents", "/providers",
+    "/session current", "/sessions", "/workbench", "/agents", "/providers",
     "/provider add claude-code", "/provider add codex", "/agent status",
     "/agent bind", "/agent switch", "/queue", "/queue tick", "/approvals",
     "/approve", "/reject", "/evidence", "/memory", "/quit",
@@ -899,6 +940,12 @@ def _resolve_scope_change_pause(state: ShellState, goal: GoalContract) -> None:
 
 def _start_accepted_goal(state: ShellState, auto: bool = False) -> ShellResponse:
     """Accept the pending proposal and start its loop."""
+    with project_write_lock(state.project_root):
+        return _start_accepted_goal_unlocked(state, auto=auto)
+
+
+def _start_accepted_goal_unlocked(state: ShellState, auto: bool = False) -> ShellResponse:
+    """Accept one proposal while the caller owns the project write lock."""
     if state.pending_goal is None:
         state.pending_goal = _latest_durable_goal_draft(state)
     if state.pending_goal is None:
@@ -918,9 +965,12 @@ def _start_accepted_goal(state: ShellState, auto: bool = False) -> ShellResponse
             state.project_root,
             acceptance.revision_id,
             on_event=state.emit_event or _print_progress_event,
+            cancellation=state.cancellation,
         )
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ProjectLockedError) as error:
         state.pending_goal = None
+        if isinstance(error, ProjectLockedError):
+            return ShellResponse(str(error))
         return ShellResponse(
             "Run interrupted. Ledger state is preserved — /workbench to inspect."
         )
@@ -944,6 +994,12 @@ def _handle_accept_goal(state: ShellState) -> ShellResponse:
 
 def _handle_cancel_goal(state: ShellState) -> ShellResponse:
     """Discard the pending proposal without starting a loop."""
+    with project_write_lock(state.project_root):
+        return _handle_cancel_goal_unlocked(state)
+
+
+def _handle_cancel_goal_unlocked(state: ShellState) -> ShellResponse:
+    """Cancel a proposal or pause while holding the project write lock."""
     if _database_exists(state):
         connection = _connect_state(state)
         try:
@@ -1062,6 +1118,11 @@ def _handle_scope_change(state: ShellState, text: str, pause_id: str) -> ShellRe
 def _handle_resume(state: ShellState, message: str) -> ShellResponse:
     """Answer the latest pause, resolve it, and resume when supported."""
     cleaned = message.strip()
+    loop_run_id: str | None = None
+    parts = cleaned.split(maxsplit=2)
+    if len(parts) >= 2 and parts[0] == "--run":
+        loop_run_id = parts[1]
+        cleaned = parts[2].strip() if len(parts) == 3 else ""
     if not cleaned:
         return ShellResponse("Resume needs a message: /resume <message>")
     if not _database_exists(state):
@@ -1069,7 +1130,7 @@ def _handle_resume(state: ShellState, message: str) -> ShellResponse:
 
     connection = _connect_state(state)
     try:
-        pause = load_latest_pause_record(connection)
+        pause = load_latest_pause_record(connection, loop_run_id)
         if pause is None:
             return ShellResponse("No paused loop to resume.")
         # Record the resume as a durable audit event, but let resume_workflow
@@ -1089,7 +1150,12 @@ def _handle_resume(state: ShellState, message: str) -> ShellResponse:
     finally:
         connection.close()
 
-    snapshot = resume_goal_loop(state.project_root, cleaned)
+    snapshot = resume_goal_loop(
+        state.project_root,
+        cleaned,
+        cancellation=state.cancellation,
+        loop_run_id=loop_run_id,
+    )
     if snapshot is None:
         return ShellResponse(f"Resume recorded: {cleaned}")
     state.latest_snapshot = snapshot
@@ -1201,7 +1267,10 @@ def handle_shell_input(state: ShellState, text: str) -> ShellResponse:
     if not stripped:
         return ShellResponse("")
     if stripped.startswith("/"):
-        return _handle_slash_command(state, stripped)
+        try:
+            return _handle_slash_command(state, stripped)
+        except ProjectLockedError as error:
+            return ShellResponse(str(error))
     is_answer = lowered in {"yes", "y", "start", "no", "n", "cancel"} or lowered.startswith(
         "edit "
     )
@@ -1256,21 +1325,41 @@ def _should_run_preflight() -> bool:
 
 def run_interactive_shell(project_root: Path, gate: bool = True) -> None:
     """Run the blocking stdin/stdout Curator shell."""
+    from curator.tui.prompt_input import (
+        configure_shell_completion,
+        load_shell_history,
+        read_multiline,
+        save_shell_history,
+    )
+
+    import sys
+
     state = ShellState(project_root=project_root, gate_mode=gate)
     print(render_banner(project_root))
     print()
+    recovered = reconcile_project(project_root)
+    if recovered:
+        print(f"Recovered {recovered} interrupted run(s).")
     if _should_run_preflight():
         print(render_preflight(run_preflight(project_root)))
         print()
     _offer_first_run_init(project_root)
     print(build_welcome_text(project_root))
-    while not state.should_exit:
-        try:
-            line = input(_prompt_prefix(state))
-        except EOFError:
-            break
-        response = handle_shell_input(state, line)
-        if response.text:
-            print(response.text)
-        if response.should_exit:
-            break
+    history_enabled = sys.stdin.isatty()
+    try:
+        if history_enabled:
+            load_shell_history(project_root)
+            configure_shell_completion()
+        while not state.should_exit:
+            try:
+                line = read_multiline(_prompt_prefix(state))
+            except EOFError:
+                break
+            response = handle_shell_input(state, line)
+            if response.text:
+                print(response.text)
+            if response.should_exit:
+                break
+    finally:
+        if history_enabled:
+            save_shell_history(project_root)

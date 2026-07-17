@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Curator v0.1.0 Release Notes</title>
+  </head>
+  <body>
+    <article>
+      <h1>Curator v0.1.0 Release Notes</h1>
+      <h2>What</h2>
+      <p>
+        Curator v0.1.0 是本机、单写入者、顺序工作流的 Phase 0 发布：Goal → writer →
+        deterministic verifier → fresh-context reviewer → human confirmation。SQLite ledger
+        保存状态、事件、provider run、evidence、pause 和 resume 记录。V1.1–V1.6 阶梯及其
+        目标边界见 <a href="v0-alpha-release-plan-v3.html">v3 发布计划</a>。
+      </p>
+      <h2>How</h2>
+      <ul>
+        <li>事务使用 connection factory、WAL 和 nested SAVEPOINT；项目写操作通过 <code>.curator/runtime.lock</code> 串行化。</li>
+        <li>机器重启后，reconcile 会把残留 execution 标为 FAILED，生成新的 interrupted pause attempt，随后可用 <code>/resume</code> 继续。</li>
+        <li>Ctrl+C/Esc、timeout 和 provider error 会记录 stopped_by/stop_reason；provider CLI 以独立进程组运行并清理进程组。</li>
+        <li>prompt/context 通过 stdin 传输，不放入 argv；实时 OUTPUT_CHUNK 以最多 4 KiB 的 text 事件写入 ledger，transcript 仅是 UI 临时输出、不做回放。</li>
+      </ul>
+      <h2>Why</h2>
+      <p>
+        这些边界让失败和中断可见、可审计、可恢复，同时避免把 provider transcript 当作系统事实。
+        单写入者设计适合 Phase 0 的 workspace ownership；它也为未来的 canonical model、runtime
+        registry、lease/heartbeat、handoff 和并行 worker 留出迁移路径。
+      </p>
+      <h2>Future improvements/considerations/trade-offs</h2>
+      <ul>
+        <li>已知限制：串行单写入者；flock 仅本地盘；mock 路径取消有延迟；TUI 粘贴多行会折叠为一次提交。</li>
+        <li>provider 要求：本地可执行且已登录的 Claude Code 或 Codex CLI；缺失 provider 会阻塞或暂停，不会伪造成功。</li>
+        <li>平台边界：macOS 主测、Linux CI、Windows 未支持；killpg 对 provider 自建进程组的逃逸仍需实际 CLI 版本 smoke。</li>
+        <li>V1 不属于本发布：DAG、并行 worker、native Provider TUI、Capability Registry 和 Runtime Handoff。</li>
+      </ul>
+    </article>
+  </body>
+</html>
