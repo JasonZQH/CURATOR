@@ -59,6 +59,7 @@ from curator.providers.events import ProviderEvent, ProviderEventKind
 from curator.providers.setup import add_provider_profile
 from curator.scheduler.snapshots import load_latest_workflow_snapshot
 from curator.shell.intent import detect_cli_command, render_command_hint
+from curator.shell.menus import MenuSpec, proposal_menu
 from curator.shell.wizard import run_setup_wizard
 from curator.shell.onboarding import (
     apply_first_run_init,
@@ -119,6 +120,7 @@ class ShellResponse:
 
     text: str
     should_exit: bool = False
+    menu: MenuSpec | None = None
 
 
 def _prompt_prefix(state: "ShellState") -> str:
@@ -873,6 +875,28 @@ KNOWN_SLASH_COMMANDS = (
     "/approve", "/reject", "/evidence", "/memory", "/quit",
 )
 
+_SLASH_DESCRIPTIONS = {
+    "/help": "Show task-oriented help",
+    "/help all": "Show every shell command",
+    "/setup": "Configure PM, Engineer, Reviewer, and providers",
+    "/init": "Create Curator state in this project",
+    "/status": "Show current project status",
+    "/doctor": "Run diagnostics and environment checks",
+    "/goal current": "Show the current goal draft",
+    "/goal start": "Start the saved goal draft",
+    "/goal history": "Show goal and discovery history",
+    "/gate on": "Require proposal approval",
+    "/gate off": "Start small requests immediately",
+    "/provider add claude-code": "Connect Claude Code",
+    "/provider add codex": "Connect Codex",
+    "/quit": "Exit the Curator shell",
+}
+
+SLASH_COMMAND_SPECS: tuple[tuple[str, str], ...] = tuple(
+    (command, _SLASH_DESCRIPTIONS.get(command, "Run this Curator command"))
+    for command in KNOWN_SLASH_COMMANDS
+)
+
 
 def _unknown_command_text(text: str) -> str:
     """Return the unknown-command notice with a closest-match suggestion."""
@@ -1244,7 +1268,7 @@ def _handle_natural_language(state: ShellState, text: str) -> ShellResponse:
     if _should_gate(state, text):
         _record_discovery_turn(state, goal, text)
         state.pending_goal = goal
-        return ShellResponse(_render_goal_proposal(goal))
+        return ShellResponse(_render_goal_proposal(goal), menu=proposal_menu())
 
     _record_discovery_turn(state, goal, text, metadata={"fast_path": True})
     state.pending_goal = goal
@@ -1259,7 +1283,7 @@ def _handle_proposal_answer(state: ShellState, stripped: str, lowered: str) -> S
         return _handle_cancel_goal(state)
     state.pending_goal = _apply_goal_edit(state.pending_goal, stripped[5:])
     save_goal(build_curator_paths(state.project_root), state.pending_goal)
-    return ShellResponse(_render_goal_proposal(state.pending_goal))
+    return ShellResponse(_render_goal_proposal(state.pending_goal), menu=proposal_menu())
 
 
 def _handle_shell_input(state: ShellState, text: str) -> ShellResponse:

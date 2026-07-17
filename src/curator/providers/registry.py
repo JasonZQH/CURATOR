@@ -18,6 +18,7 @@ from curator.state.repositories import (
 
 # Canonical role instances that carry functional-slot provider bindings.
 SLOT_ROLE_INSTANCES: dict[str, str] = {
+    "maindeck": "maindeck.default",
     "writer": "writer.default",
     "reviewer": "reviewer.default",
 }

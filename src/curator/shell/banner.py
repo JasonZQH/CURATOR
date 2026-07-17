@@ -12,6 +12,15 @@ ASCII_BANNER = r"""
  \____|\___/|_| \_\/_/   \_\_| \___/|_| \_\
 """.strip("\n")
 
+SLOGAN = "Plan with confidence. Ship with evidence."
+
+WHATS_NEW = (
+    "Full-screen first-run trust and setup",
+    "Keyboard-selectable slash commands and proposal actions",
+    "PM (main deck), Engineer, and Reviewer seat labels",
+    "Persistent history, Tab completion, and Shift+Enter continuation",
+)
+
 
 def git_branch(project_root: Path | str) -> str | None:
     """Return the checked-out branch name, or None outside a repository."""
@@ -40,3 +49,10 @@ def render_banner(project_root: Path | str) -> str:
     if branch is not None:
         identity = f"{identity} · git:{branch}"
     return f"{ASCII_BANNER}\n\n  {identity}"
+
+
+def render_whats_new() -> str:
+    """Render the concise release highlights shown once at TUI startup."""
+    lines = [SLOGAN, "", "What’s new:"]
+    lines.extend(f"  • {item}" for item in WHATS_NEW)
+    return "\n".join(lines)
