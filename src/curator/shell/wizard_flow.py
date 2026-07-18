@@ -76,9 +76,13 @@ class SetupFlow:
         return (
             Say(
                 "Setup · Step 1/3 — Team seats\n\n"
-                "PM (main deck) plans read-only, Engineer implements, Reviewer verifies read-only."
+                "PM (main deck) plans read-only, Engineer implements, Reviewer verifies read-only.\n"
+                "Custom roles are not selectable in v0.1.0; edit role contracts after setup if needed."
             ),
-            Ask("Use the default team?", ("Use default team (recommended)", "Cancel setup")),
+            Ask(
+                "Use the default team?",
+                ("Use PM, Engineer, and Reviewer (recommended)", "Cancel setup"),
+            ),
         )
 
     def advance(self, answer: str) -> tuple[Say | Ask | Probe | Done, ...]:

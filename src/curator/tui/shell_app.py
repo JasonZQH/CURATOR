@@ -42,15 +42,17 @@ class CuratorShellApp(App[None]):
     """Full-screen shell wrapping the line REPL's input contract."""
 
     CSS = """
-    #header { height: 1; padding: 0 1; background: $panel; color: $text; }
-    #log { height: 1fr; padding: 0 1; }
+    Screen { background: ansi_default; }
+    CuratorShellApp { background: ansi_default; }
+    #header { height: 1; padding: 0 1; background: transparent; color: $text-muted; }
+    #log { height: 1fr; padding: 0 1; background: transparent; scrollbar-size: 0 0; }
     #palette { layer: overlay; height: auto; max-height: 12; dock: bottom; margin: 0 1 4 1; display: none; background: $surface; border: round $accent; }
-    #hints { height: 1; padding: 0 1; color: $text-muted; background: $panel; }
+    #hints { height: 1; padding: 0 1; color: $text-muted; background: transparent; }
     #suggest { display: none; }
     #selection { layer: overlay; height: auto; max-height: 8; dock: bottom; margin: 0 1 4 1; display: none; background: $surface; border: round $accent; }
     #menu-title { layer: overlay; height: 1; dock: bottom; margin: 0 1 12 1; display: none; color: $text; }
-    #status { height: 1; dock: bottom; padding: 0 1; background: $panel; color: $text-muted; }
-    #input { dock: bottom; }
+    #status { height: 1; dock: bottom; padding: 0 1; background: transparent; color: $text-muted; }
+    #input { dock: bottom; background: transparent; border: none; }
     """
 
     BINDINGS = [
@@ -89,6 +91,7 @@ class CuratorShellApp(App[None]):
         yield OptionList(id="selection")
         yield Static("", id="hints")
         yield Static("", id="suggest")
+        yield SetupScreen(self.state.project_root, self._on_setup_finished)
         yield Input(placeholder="Type what you want to work on, or /help", id="input")
         yield Static("", id="status")
 
@@ -370,14 +373,17 @@ class CuratorShellApp(App[None]):
         self.run_worker(lambda: self._dispatch(text), thread=True, exclusive=True, group="dispatch")
 
     def _open_setup(self) -> None:
-        """Push the native setup overlay and pause prompt input until it closes."""
-        self.query_one("#input", Input).disabled = True
-        self.push_screen(SetupScreen(self.state.project_root), self._on_setup_finished)
+        """Dock setup above the footer and replace the ordinary input prompt."""
+        self.query_one("#input", Input).styles.display = "none"
+        self.query_one("#hints", Static).styles.display = "none"
+        self.query_one("#setup-panel", SetupScreen).open()
 
     def _on_setup_finished(self, result) -> None:
-        """Render setup completion and restore the shell footer and prompt."""
+        """Render setup completion and restore the ordinary bottom prompt."""
         if result is not None:
             self._write(result.message)
+        self.query_one("#input", Input).styles.display = "block"
+        self.query_one("#hints", Static).styles.display = "block"
         self._refresh_status()
         self._enable_input()
 
@@ -449,6 +455,10 @@ class CuratorShellApp(App[None]):
 
     def action_interrupt(self) -> None:
         """Route Esc through overlays before idle exit or busy cancellation."""
+        setup = self.query_one("#setup-panel", SetupScreen)
+        if setup._open:
+            setup.cancel()
+            return
         if self._menu is not None:
             self._close_menu()
             self._enable_input()

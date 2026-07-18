@@ -16,7 +16,7 @@ class TrustScreen(ModalScreen[bool]):
     BINDINGS = [Binding("escape", "cancel", "Exit")]
 
     CSS = """
-    TrustScreen { align: left top; background: $background; }
+    TrustScreen { align: left top; background: ansi_default; }
     #trust-content { width: 100%; height: 100%; padding: 2 3; }
     #trust-topline { height: 1; background: #d89b28; }
     #trust-eyebrow { margin-top: 2; color: #d89b28; text-style: bold; }
