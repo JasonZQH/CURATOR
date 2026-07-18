@@ -6,6 +6,7 @@ from pathlib import Path
 
 from curator.core.enums import (
     EventType,
+    EvidenceKind,
     HarnessStatus,
     LoopStatus,
     LoopStepType,
@@ -20,6 +21,7 @@ from curator.state.repositories import (
     insert_loop_run,
     insert_pause_record,
     insert_provider_run,
+    load_evidence_refs,
     load_loop_iterations_for_run,
     load_loop_runs_by_status,
     load_pause_records_for_run,
@@ -134,8 +136,14 @@ def reconcile(
                 )
             else:
                 attempt = _interrupted_attempt(pauses)
+                # Claim workspace ownership from the same signal the engine's clean-tree
+                # guard uses (_has_implementation_evidence): persisted IMPLEMENTATION
+                # evidence, not the mere existence of an IMPLEMENT iteration. A writer that
+                # was only RUNNING at crash produced no evidence, so resume must re-run the
+                # guard rather than skip it and misattribute a dirty tree to the loop.
                 workspace_owned = any(
-                    iteration.step_type is LoopStepType.IMPLEMENT for iteration in iterations
+                    ref.kind is EvidenceKind.IMPLEMENTATION
+                    for ref in load_evidence_refs(connection, loop_run.id)
                 )
                 pause = PauseRecord(
                     id=f"pause-{loop_run.id}-interrupted-{attempt}",

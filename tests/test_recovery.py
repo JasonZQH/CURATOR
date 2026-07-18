@@ -9,6 +9,7 @@ import sys
 import pytest
 
 from curator.core.enums import (
+    EvidenceKind,
     HarnessStatus,
     LoopStatus,
     LoopStepType,
@@ -17,12 +18,13 @@ from curator.core.enums import (
     ProviderRunStatus,
     RoleName,
 )
-from curator.core.models.loops import LoopIterationRecord
+from curator.core.models.loops import EvidenceRef, LoopIterationRecord
 from curator.core.models.runtime import ProviderRunRecord
 from curator.scheduler.engine import create_workflow_session
 from curator.scheduler.recovery import reconcile, reconcile_project
 from curator.state.db import connect_database, initialize_database
 from curator.state.repositories import (
+    insert_evidence_ref,
     insert_loop_run,
     insert_pause_record,
     load_loop_runs_for_session,
@@ -30,6 +32,70 @@ from curator.state.repositories import (
     insert_loop_iteration,
     insert_provider_run,
 )
+
+
+def _running_implement_iteration(loop_run, session_id, now):
+    """Return a writer iteration that was RUNNING (mid-implement) at crash time."""
+    return LoopIterationRecord(
+        id=f"{loop_run.id}-iteration-running",
+        loop_run_id=loop_run.id,
+        session_id=session_id,
+        sequence=1,
+        step_type=LoopStepType.IMPLEMENT,
+        role=RoleName.ENGINEER,
+        status=HarnessStatus.RUNNING,
+        started_at=now,
+        task_id="task-002-implement",
+    )
+
+
+def test_reconcile_without_implementation_evidence_does_not_claim_workspace(tmp_path):
+    """Verify a writer that crashed before producing evidence does not mark the workspace owned.
+
+    Recovery must use the same evidence-based signal the engine's clean-tree guard uses; otherwise
+    resume skips the guard and a pre-existing or half-written dirty tree is misattributed to the loop.
+    """
+    now = datetime(2026, 7, 17, 3, tzinfo=UTC)
+    connection = connect_database(tmp_path / ".curator" / "curator.sqlite")
+    initialize_database(connection)
+    session_id = create_workflow_session(connection, tmp_path, created_at=now)
+    loop_run = load_loop_runs_for_session(connection, session_id)[0]
+    insert_loop_iteration(connection, _running_implement_iteration(loop_run, session_id, now))
+
+    assert reconcile(connection, tmp_path, now) == 1
+    pause = load_pause_records_for_run(connection, loop_run.id)[-1]
+    assert pause.metadata["workspace_owned"] is False
+    connection.close()
+
+
+def test_reconcile_with_implementation_evidence_claims_workspace(tmp_path):
+    """Verify a writer that already produced implementation evidence keeps workspace ownership."""
+    now = datetime(2026, 7, 17, 4, tzinfo=UTC)
+    connection = connect_database(tmp_path / ".curator" / "curator.sqlite")
+    initialize_database(connection)
+    session_id = create_workflow_session(connection, tmp_path, created_at=now)
+    loop_run = load_loop_runs_for_session(connection, session_id)[0]
+    iteration = _running_implement_iteration(loop_run, session_id, now)
+    insert_loop_iteration(connection, iteration)
+    insert_evidence_ref(
+        connection,
+        EvidenceRef(
+            id=f"{iteration.id}-impl-evidence",
+            session_id=session_id,
+            loop_run_id=loop_run.id,
+            iteration_id=iteration.id,
+            kind=EvidenceKind.IMPLEMENTATION,
+            uri="diff://writer",
+            summary="writer applied an implementation diff",
+            producer_role=RoleName.ENGINEER,
+            created_at=now,
+        ),
+    )
+
+    assert reconcile(connection, tmp_path, now) == 1
+    pause = load_pause_records_for_run(connection, loop_run.id)[-1]
+    assert pause.metadata["workspace_owned"] is True
+    connection.close()
 
 
 def test_reconcile_creates_idempotent_and_incrementing_interrupted_pauses(tmp_path):

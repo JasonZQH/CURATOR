@@ -10,8 +10,8 @@ _SECRET_PATTERNS = (
 _MAX_ERROR_CHARS = 500
 
 
-def redact_error(value: str | None, limit: int = _MAX_ERROR_CHARS) -> str:
-    """Redact common credential patterns and cap persisted provider errors."""
+def redact_secrets(value: str | None) -> str:
+    """Redact common credential patterns from text without truncating it."""
     text = value or ""
     for pattern in _SECRET_PATTERNS:
         def replace(match: re.Match[str]) -> str:
@@ -25,4 +25,9 @@ def redact_error(value: str | None, limit: int = _MAX_ERROR_CHARS) -> str:
             return f"{key}=[REDACTED]"
 
         text = pattern.sub(replace, text)
-    return text[-limit:]
+    return text
+
+
+def redact_error(value: str | None, limit: int = _MAX_ERROR_CHARS) -> str:
+    """Redact credentials and cap a persisted provider error to its trailing chars."""
+    return redact_secrets(value)[-limit:]

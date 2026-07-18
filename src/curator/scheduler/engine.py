@@ -58,7 +58,7 @@ from curator.providers.contracts import (
     ProviderRunRequest,
     classify_provider_error,
 )
-from curator.providers.redact import redact_error
+from curator.providers.redact import redact_error, redact_secrets
 from curator.providers.base import Provider
 from curator.providers.driver import ProviderDriver, driver_for_provider
 from curator.providers.events import (
@@ -198,6 +198,19 @@ _LEDGER_EVENT_TYPES = {
 }
 
 
+def _ledger_event_payload(event: ProviderEvent) -> dict:
+    """Return the durable ledger payload for a provider event.
+
+    Provider stdout can echo credentials, so OUTPUT_CHUNK text is scrubbed before it
+    is persisted (errors are already redacted via redact_error); redact then head-cap
+    so the persisted chunk never contains a secret in cleartext.
+    """
+    payload = {"kind": event.kind.value, "label": event.label}
+    if event.kind is ProviderEventKind.OUTPUT_CHUNK:
+        payload["text"] = redact_secrets(str(event.payload.get("text", "")))[:4096]
+    return payload
+
+
 def _ledger_event_recorder(
     ctx: LoopExecutionContext,
     spec: HarnessRunSpec,
@@ -219,15 +232,7 @@ def _ledger_event_recorder(
                     task_id=task_id,
                     type=event_type,
                     created_at=_timestamp(ctx.created_at),
-                    payload={
-                        "kind": event.kind.value,
-                        "label": event.label,
-                        **(
-                            {"text": str(event.payload.get("text", ""))[:4096]}
-                            if event.kind is ProviderEventKind.OUTPUT_CHUNK
-                            else {}
-                        ),
-                    },
+                    payload=_ledger_event_payload(event),
                 ),
             )
         if ctx.on_event is not None:
@@ -420,6 +425,10 @@ def _pause_reason_for_provider_error(provider_error: Exception) -> str | None:
         return "Provider timed out; pausing for user input."
     if error_kind.value == "cancelled":
         return "Provider was cancelled; pausing for user input."
+    # An untyped exception classified as provider_unavailable is an unexpected provider
+    # bug, not a recognized recoverable failure: return None so the run STOP_FAILEDs
+    # (see test_provider_failure_matrix_stops_on_untyped_runtime_error). The pause-worthy
+    # provider_unavailable in decision._PAUSED_ERROR_KINDS is the result-reported kind.
     return None
 
 
