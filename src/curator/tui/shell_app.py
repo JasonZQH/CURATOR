@@ -98,24 +98,23 @@ class CuratorShellApp(App[None]):
         banner = render_banner(self.state.project_root)
         self.query_one("#header", Static).update(banner.splitlines()[-1])
         self._write(banner)
-        self._write(render_whats_new())
         self.query_one("#input", Input).disabled = True
         self.set_interval(0.2, self._refresh_busy_status)
         decision = trust_decision(self.state.project_root) if self._trust_required else True
-        if decision is None:
-            self.push_screen(TrustScreen(), self._on_trust_decision)
-        else:
+        if decision is True:
             self._start_after_trust(decision)
+        else:
+            self.push_screen(TrustScreen(self.state.project_root), self._on_trust_decision)
 
     def _on_trust_decision(self, trusted: bool | None) -> None:
-        """Persist the modal result and continue or exit without project access."""
+        """Persist approval only and exit without locking out future launches."""
         trusted = bool(trusted)
-        record_trust_decision(self.state.project_root, trusted)
         if not trusted:
             self._write("Project not trusted. No project files were changed.")
             self.state.should_exit = True
             self.exit()
             return
+        record_trust_decision(self.state.project_root, True)
         self._start_after_trust(True)
 
     def _start_after_trust(self, trusted: bool) -> None:
@@ -123,6 +122,7 @@ class CuratorShellApp(App[None]):
         if not trusted:
             self._on_trust_decision(False)
             return
+        self._write(render_whats_new())
         self._history = load_shell_history_entries(self.state.project_root)
         self._history_index = len(self._history)
         if _should_run_preflight():
