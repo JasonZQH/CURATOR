@@ -6,14 +6,16 @@ from pathlib import Path
 from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.widgets import Input, OptionList, RichLog, Static
+from textual.containers import Horizontal, Vertical
+from textual.widgets import Input, OptionList, Static
 from textual.widgets.option_list import Option
 
 from curator.core.paths import build_curator_paths
-from curator.diagnostics.preflight import render_preflight, run_preflight
+from curator.diagnostics.preflight import run_preflight
 from curator.providers.events import ProviderEvent
 from curator.scheduler.recovery import reconcile_project
-from curator.shell.banner import render_banner, render_whats_new
+from curator import __version__
+from curator.shell.banner import ASCII_BANNER, SLOGAN, WHATS_NEW, git_branch
 from curator.shell.menus import MenuSpec
 from curator.shell.modes import mode_for_gate, next_mode
 from curator.shell.onboarding import build_welcome_text, first_run_needed, open_pause_exists, resolve_mode_for_project
@@ -29,13 +31,17 @@ from curator.shell.errors import recoverable_error_message
 from curator.shell.trust import _should_check_trust, record_trust_decision, trust_decision
 from curator.state.db import connect_database, initialize_database
 from curator.state.repositories import load_provider_binding_for_role
-from curator.tui.format import escape_markup, render_provider_event
+from curator.tui.format import escape_markup, render_provider_event, user_echo
 from curator.tui.palette import SlashPalette
 from curator.tui.prompt_input import append_shell_history_entry, completion_matches, load_shell_history_entries
+from curator.tui.reflow_log import ReflowRichLog
 from curator.tui.setup_screen import SetupScreen
 from curator.tui.trust_screen import TrustScreen
 
 _MAX_SUGGESTIONS = 6
+# Bound the plain-text transcript mirror so a long streamed run cannot grow it without
+# limit (the on-screen log is already capped); mirrors the _history[-100:] cap.
+_MAX_TRANSCRIPT_ENTRIES = 2000
 
 
 class CuratorShellApp(App[None]):
@@ -44,26 +50,37 @@ class CuratorShellApp(App[None]):
     CSS = """
     Screen { background: ansi_default; }
     CuratorShellApp { background: ansi_default; }
-    #header { height: 1; padding: 0 1; background: transparent; color: $text-muted; }
-    #log { height: 1fr; padding: 0 1; background: transparent; scrollbar-size: 0 0; }
-    #palette { layer: overlay; height: auto; max-height: 12; dock: bottom; margin: 0 1 4 1; display: none; background: $surface; border: round $accent; }
-    #hints { height: 1; padding: 0 1; color: $text-muted; background: transparent; }
-    #suggest { display: none; }
-    #selection { layer: overlay; height: auto; max-height: 8; dock: bottom; margin: 0 1 4 1; display: none; background: $surface; border: round $accent; }
-    #menu-title { layer: overlay; height: 1; dock: bottom; margin: 0 1 12 1; display: none; color: $text; }
-    #status { height: 1; dock: bottom; padding: 0 1; background: transparent; color: $text-muted; }
-    #input { dock: bottom; background: transparent; border: none; }
+    #log { height: 1fr; padding: 1 1 0 1; background: transparent; scrollbar-size: 0 0; }
+    #footer { dock: bottom; height: auto; background: transparent; }
+    #menu-title { height: 1; display: none; padding: 0 1; color: $text-muted; }
+    #selection { height: auto; max-height: 8; display: none; padding: 0 1; background: transparent; border: none; }
+    #selection:focus { border: none; }
+    #selection > .option-list--option { padding: 0 1; }
+    #selection > .option-list--option-highlighted { color: #eaf1ff; background: #24306a; text-style: bold; }
+    #palette { height: auto; max-height: 10; display: none; padding: 0 1; background: transparent; border: none; }
+    #palette:focus { border: none; }
+    #palette > .option-list--option { padding: 0 1; }
+    #palette > .option-list--option-highlighted { color: #eaf1ff; background: #24306a; text-style: bold; }
+    #hints { height: auto; padding: 0 1; color: $text-muted; background: transparent; }
+    #status { height: 1; padding: 0 1; background: transparent; color: $text-muted; }
+    #composer { height: 3; margin: 0 1; padding: 0 1; background: transparent; border: round #2c3a6e; }
+    #composer:focus-within { border: round #9dbcff; }
+    #prompt-caret { width: 2; height: 1; color: #5b9bff; text-style: bold; }
+    #input { width: 1fr; height: 1; padding: 0; background: transparent; border: none; }
     """
 
     BINDINGS = [
-        Binding("ctrl+c", "interrupt", "Interrupt", priority=True),
-        Binding("escape", "interrupt", "Interrupt", priority=True),
+        Binding("ctrl+c", "interrupt", "Quit", priority=True),
+        Binding("escape", "escape", "Back", priority=True),
         Binding("shift+tab", "cycle_mode", "Approval mode"),
     ]
 
     def __init__(self, project_root: Path | str, gate: bool = True) -> None:
         """Bind the app to one project root and shell state."""
-        super().__init__()
+        # Enable native ANSI so an `ansi_default` background passes through to the
+        # terminal (inheriting the user's Ghostty/iTerm background) instead of
+        # being flattened to an opaque theme color by the truecolor filter.
+        super().__init__(ansi_color=True)
         self.state = ShellState(project_root=Path(project_root), gate_mode=gate)
         self.transcript: list[str] = []
         self._busy = False
@@ -83,24 +100,22 @@ class CuratorShellApp(App[None]):
         self._trust_required = _should_check_trust()
 
     def compose(self) -> ComposeResult:
-        """Compose the header, transcript, palette, input, and footer chrome."""
-        yield Static("", id="header")
-        yield RichLog(id="log", wrap=True, markup=True)
-        yield SlashPalette(id="palette")
-        yield Static("", id="menu-title")
-        yield OptionList(id="selection")
-        yield Static("", id="hints")
-        yield Static("", id="suggest")
+        """Compose the transcript, overlays, input, and footer chrome."""
+        yield ReflowRichLog(id="log")
         yield SetupScreen(self.state.project_root, self._on_setup_finished)
-        yield Input(placeholder="Type what you want to work on, or /help", id="input")
-        yield Static("", id="status")
+        with Vertical(id="footer"):
+            yield Static("", id="menu-title")
+            yield OptionList(id="selection")
+            yield SlashPalette(id="palette")
+            yield Static("", id="hints")
+            with Horizontal(id="composer"):
+                yield Static("›", id="prompt-caret")
+                yield Input(placeholder="Type what you want to work on, or /help", id="input")
+            yield Static("", id="status")
 
     def on_mount(self) -> None:
         """Show trust before project reads, then start checks and onboarding."""
         self.state.emit_event = self._emit_provider_event
-        banner = render_banner(self.state.project_root)
-        self.query_one("#header", Static).update(banner.splitlines()[-1])
-        self._write(banner)
         self.query_one("#input", Input).disabled = True
         self.set_interval(0.2, self._refresh_busy_status)
         decision = trust_decision(self.state.project_root) if self._trust_required else True
@@ -125,7 +140,7 @@ class CuratorShellApp(App[None]):
         if not trusted:
             self._on_trust_decision(False)
             return
-        self._write(render_whats_new())
+        self._render_welcome()
         self._history = load_shell_history_entries(self.state.project_root)
         self._history_index = len(self._history)
         if _should_run_preflight():
@@ -134,30 +149,30 @@ class CuratorShellApp(App[None]):
             self._finish_startup(self._startup_without_preflight())
 
     def _startup_without_preflight(self) -> str:
-        """Recover interrupted work and render the welcome text without probes."""
+        """Recover interrupted work without probes; the welcome card carries guidance."""
         try:
             recovered = reconcile_project(self.state.project_root)
         except Exception as error:
             return recoverable_error_message(self.state.project_root, "startup recovery", error)
-        prefix = f"Recovered {recovered} interrupted run(s).\n\n" if recovered else ""
-        return f"{prefix}{build_welcome_text(self.state.project_root)}"
+        return f"Recovered {recovered} interrupted run(s)." if recovered else ""
 
     def _startup_preflight(self) -> None:
-        """Run environment probes off the UI thread and return their report."""
+        """Probe the environment off the UI thread, surfacing only problems."""
         try:
             recovered = reconcile_project(self.state.project_root)
-            def on_check(check) -> None:
-                """Mirror one completed preflight check into the transcript."""
-                mark = {"ok": "✓", "warn": "!", "fail": "✗"}.get(check.status, "?")
-                self.call_from_thread(self._write, f"checking {check.key}… {mark}")
-
+            self.call_from_thread(self.query_one("#hints", Static).update, "Checking environment…")
             report = run_preflight(self.state.project_root)
-            for check in report.checks:
-                on_check(check)
-            text = render_preflight(report)
+            parts: list[str] = []
             if recovered:
-                text = f"Recovered {recovered} interrupted run(s).\n\n{text}"
-            startup_text = f"{text}\n\n{build_welcome_text(self.state.project_root)}"
+                parts.append(f"Recovered {recovered} interrupted run(s).")
+            issues = [check for check in report.checks if check.status != "ok"]
+            if issues:
+                marks = {"warn": "!", "fail": "✗"}
+                lines = ["Environment needs attention:"]
+                lines.extend(f"  {marks.get(c.status, '?')} {c.detail}" for c in issues)
+                lines.append("Run /doctor for the full report and fixes.")
+                parts.append("\n".join(lines))
+            startup_text = "\n\n".join(parts)
         except Exception as error:
             startup_text = recoverable_error_message(self.state.project_root, "startup preflight", error)
         self.call_from_thread(self._finish_startup, startup_text)
@@ -165,7 +180,9 @@ class CuratorShellApp(App[None]):
     def _finish_startup(self, text: str) -> None:
         """Mark startup ready, render diagnostics, and open first-run setup."""
         self._startup_ready = True
-        self._write(text)
+        self.query_one("#hints", Static).update("")
+        if text:
+            self._write(text)
         self._refresh_status()
         if self._trust_required and first_run_needed(self.state.project_root):
             self._open_setup()
@@ -178,10 +195,67 @@ class CuratorShellApp(App[None]):
         input_widget.disabled = False
         input_widget.focus()
 
-    def _write(self, text: str, markup: bool = False) -> None:
+    def _write(
+        self,
+        text: str,
+        markup: bool = False,
+        transcript_text: str | None = None,
+        fill: bool = False,
+    ) -> None:
         """Append one safe or intentionally styled block to the TUI transcript."""
-        self.transcript.append(text)
-        self.query_one("#log", RichLog).write(text if markup else escape_markup(text))
+        self.transcript.append(text if transcript_text is None else transcript_text)
+        if len(self.transcript) > _MAX_TRANSCRIPT_ENTRIES:
+            self.transcript = self.transcript[-_MAX_TRANSCRIPT_ENTRIES:]
+        content = text if markup else escape_markup(text)
+        self.query_one("#log", ReflowRichLog).write_entry(content, fill=fill)
+
+    def _render_welcome(self) -> None:
+        """Render the two-column welcome card: wordmark + slogan, then getting-started + news."""
+        from rich import box as rich_box
+        from rich.panel import Panel
+        from rich.table import Table
+        from rich.text import Text
+
+        root = self.state.project_root
+        branch = git_branch(root)
+        home = str(Path.home())
+        short = ("~" + str(root)[len(home) :]) if str(root).startswith(home) else root.name
+        context = resolve_mode_for_project(root).label + " · " + short
+        if branch:
+            context += f" · git:{branch}"
+
+        left = Text()
+        left.append(f"{ASCII_BANNER}\n\n", style="#5b9bff")
+        left.append("Plan with confidence.\nShip with evidence.\n\n", style="#b98bff")
+        left.append(context, style="#5f7290")
+
+        right = Text()
+        right.append("Getting started\n", style="bold #b98bff")
+        right.append(f"{build_welcome_text(root)}\n\n", style="#c8d8ff")
+        right.append("What’s new\n", style="bold #b98bff")
+        for item in WHATS_NEW:
+            right.append(f"  • {item}\n", style="#8fa6d6")
+
+        grid = Table.grid(padding=(0, 4))
+        grid.add_column()
+        grid.add_column()
+        grid.add_row(left, right)
+
+        panel = Panel(
+            grid,
+            title=f"curator v{__version__}",
+            title_align="left",
+            border_style="#5b9bff",
+            box=rich_box.ROUNDED,
+            padding=(0, 2),
+            expand=False,
+        )
+        self._write_renderable(panel, f"curator v{__version__} · {short} · {SLOGAN}")
+
+    def _write_renderable(self, renderable: object, transcript_text: str) -> None:
+        """Write a Rich renderable to the log, keeping a plain-text transcript mirror."""
+        self.transcript.append(transcript_text)
+        self.query_one("#log", ReflowRichLog).write_entry(renderable)
 
     def _emit_provider_event(self, event: ProviderEvent) -> None:
         """Stream one provider progress line into the log."""
@@ -207,49 +281,41 @@ class CuratorShellApp(App[None]):
                     binding = load_provider_binding_for_role(connection, seat)
                     bound[label] = binding.provider_profile_id if binding else "unbound"
                     parts.append(f"{label}:{bound[label]}")
-                if bound.get("eng") != "unbound":
-                    parts.append(f"writer:{bound['eng']}")
-                if bound.get("rev") != "unbound":
-                    parts.append(f"reviewer:{bound['rev']}")
             finally:
                 connection.close()
         parts.extend(("gate:on" if self.state.gate_mode else "gate:off", root.name))
         text = " · ".join(parts)
-        if self._busy and self._busy_started_at is not None:
-            elapsed = time.monotonic() - self._busy_started_at
-            frame = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"[self._spinner_index % 10]
-            text = f"{frame} Working… {elapsed:.1f}s · Esc interrupts · {text}"
         if open_pause_exists(root):
             text = f"{text}  ⏸ paused — /resume · /revise · /cancel"
         return text
+
+    def _working_line(self) -> str:
+        """Return the amber working indicator shown just above the input."""
+        frame = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"[self._spinner_index % 10]
+        elapsed = 0.0 if self._busy_started_at is None else time.monotonic() - self._busy_started_at
+        return f"[#5b9bff]{frame}[/] Working… {elapsed:.1f}s · Esc interrupts"
 
     def _refresh_status(self) -> None:
         """Re-render the bottom status bar."""
         self.query_one("#status", Static).update(self._status_text())
 
     def _refresh_busy_status(self) -> None:
-        """Advance the spinner and refresh elapsed work time when busy."""
+        """Advance the spinner and refresh the above-input working indicator."""
         if self._busy:
             self._spinner_index += 1
-            self._refresh_status()
+            self.query_one("#hints", Static).update(self._working_line())
 
     def on_input_changed(self, event: Input.Changed) -> None:
         """Update the selectable slash palette and compact hint row."""
         text = event.value.strip()
         if not text.startswith("/") or self._menu is not None:
             self._hide_palette()
-            self.query_one("#hints", Static).update("")
-            self.query_one("#suggest", Static).update("")
             self._completion_prefix = None
             self._completion_index = 0
             return
         matches = [command for command in KNOWN_SLASH_COMMANDS if command.startswith(text)]
         self._palette_matches = matches[:_MAX_SUGGESTIONS]
         descriptions = dict(SLASH_COMMAND_SPECS)
-        self.query_one("#hints", Static).update(
-            "  ".join(f"{command} — {descriptions.get(command, '')}" for command in self._palette_matches)
-        )
-        self.query_one("#suggest", Static).update("  ".join(self._palette_matches))
         if self._palette_matches:
             palette = self.query_one("#palette", SlashPalette)
             palette.update_commands((command, descriptions.get(command, "")) for command in self._palette_matches)
@@ -270,7 +336,7 @@ class CuratorShellApp(App[None]):
         input_widget = self.query_one("#input", Input)
         if not input_widget.has_focus:
             return
-        if self._menu is not None and event.key in {"up", "down", "tab", "enter"}:
+        if self._menu is not None and event.key in {"up", "down", "tab"}:
             event.prevent_default()
             if event.key in {"up", "down"}:
                 self._menu_index = max(0, min(len(self._menu.options) - 1, self._menu_index + (1 if event.key == "down" else -1)))
@@ -278,6 +344,9 @@ class CuratorShellApp(App[None]):
             else:
                 self._submit_menu_option()
             return
+        # Enter is intentionally not intercepted here: it flows to on_input_submitted,
+        # which accepts the highlighted option only when nothing was typed, so a typed
+        # reply over the menu submits as text instead of running the highlighted option.
         if self._palette_matches and event.key in {"up", "down", "tab"}:
             event.prevent_default()
             if event.key in {"up", "down"}:
@@ -329,10 +398,15 @@ class CuratorShellApp(App[None]):
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         """Dispatch one submitted line through the shared shell contract."""
-        if self._menu is not None:
-            self._submit_menu_option()
-            return
         text = event.value.strip()
+        if self._menu is not None:
+            # An empty Enter accepts the highlighted option (keyboard-menu path).
+            # Any typed reply is the user's intent — never discard it to submit the
+            # highlighted option (which would run "yes" when they typed "no").
+            if not text:
+                self._submit_menu_option()
+                return
+            self._close_menu()
         if self._palette_matches and text not in KNOWN_SLASH_COMMANDS:
             self._accept_palette()
             text = self.query_one("#input", Input).value.strip()
@@ -361,29 +435,30 @@ class CuratorShellApp(App[None]):
         if self._busy:
             self._write("Curator is busy — press Esc to interrupt the active run.")
             return
-        self._write(f"› {text}")
+        self._write(user_echo(text), markup=True, transcript_text=f"› {text}", fill=True)
         if text == "/setup":
             self._open_setup()
             return
         self._busy = True
+        # Re-arm cancellation for this run; the token is shared across every run,
+        # so a prior Esc/Ctrl+C must not carry into the one we are starting.
+        self.state.cancellation.reset()
         self._busy_started_at = time.monotonic()
         self._spinner_index = 0
         self.query_one("#input", Input).disabled = True
-        self._write("⠋ Working… (Esc interrupts)")
+        self.query_one("#hints", Static).update(self._working_line())
         self.run_worker(lambda: self._dispatch(text), thread=True, exclusive=True, group="dispatch")
 
     def _open_setup(self) -> None:
-        """Dock setup above the footer and replace the ordinary input prompt."""
-        self.query_one("#input", Input).styles.display = "none"
-        self.query_one("#hints", Static).styles.display = "none"
+        """Replace the whole bottom footer with the setup panel while it runs."""
+        self.query_one("#footer", Vertical).styles.display = "none"
         self.query_one("#setup-panel", SetupScreen).open()
 
     def _on_setup_finished(self, result) -> None:
         """Render setup completion and restore the ordinary bottom prompt."""
         if result is not None:
             self._write(result.message)
-        self.query_one("#input", Input).styles.display = "block"
-        self.query_one("#hints", Static).styles.display = "block"
+        self.query_one("#footer", Vertical).styles.display = "block"
         self._refresh_status()
         self._enable_input()
 
@@ -402,6 +477,7 @@ class CuratorShellApp(App[None]):
         self._busy = False
         self._busy_started_at = None
         self._interrupt_count = 0
+        self.query_one("#hints", Static).update("")
         if response.menu is not None:
             self._show_menu(response.menu)
         elif not self._shutdown_requested:
@@ -453,18 +529,37 @@ class CuratorShellApp(App[None]):
         self._write(f"Approval mode: {mode.value}")
         self._refresh_status()
 
-    def action_interrupt(self) -> None:
-        """Route Esc through overlays before idle exit or busy cancellation."""
-        setup = self.query_one("#setup-panel", SetupScreen)
-        if setup._open:
-            setup.cancel()
-            return
+    def _close_open_overlay(self) -> bool:
+        """Close an open setup panel, proposal menu, or slash palette if any is up."""
+        if self.query_one("#setup-panel", SetupScreen)._open:
+            self.query_one("#setup-panel", SetupScreen).cancel()
+            return True
         if self._menu is not None:
             self._close_menu()
             self._enable_input()
-            return
+            return True
         if self._palette_matches:
             self._hide_palette()
+            return True
+        return False
+
+    def action_escape(self) -> None:
+        """Esc dismisses a modal/overlay or interrupts a run — it never exits the app."""
+        # The app-level Esc binding is priority, so it fires even while a pushed
+        # modal (the first-run trust screen) is focused and would otherwise handle
+        # its own Esc. Delegate to the modal so its advertised "Esc to exit" works.
+        if isinstance(self.screen, TrustScreen):
+            self.screen.dismiss(False)
+            return
+        if self._close_open_overlay():
+            return
+        if self._busy:
+            self.state.cancellation.cancel()
+            self._write("Cancellation requested — stopping the run.")
+
+    def action_interrupt(self) -> None:
+        """Ctrl+C closes an overlay, quits when idle, or two-stage cancels when busy."""
+        if self._close_open_overlay():
             return
         if not self._busy:
             self.state.should_exit = True

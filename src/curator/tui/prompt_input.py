@@ -34,24 +34,26 @@ def save_shell_history(project_root: Path | str) -> None:
 
 
 def load_shell_history_entries(project_root: Path | str) -> list[str]:
-    """Load recent history entries for the full-screen input widget."""
+    """Load the most recent bounded window of history for the full-screen input widget."""
     path = history_path(project_root)
     if not path.exists():
         return []
     try:
-        return [line.replace("\\n", "\n") for line in path.read_text(encoding="utf-8").splitlines() if line]
+        lines = [line.replace("\\n", "\n") for line in path.read_text(encoding="utf-8").splitlines() if line]
     except (OSError, UnicodeError):
         return []
+    return lines[-_MAX_HISTORY_ENTRIES:]
 
 
 def append_shell_history_entry(project_root: Path | str, entry: str) -> None:
-    """Append one escaped full-screen input entry with private permissions."""
+    """Append one entry, keeping the on-disk history bounded to the most recent window."""
     path = history_path(project_root)
     path.parent.mkdir(parents=True, exist_ok=True)
+    entries = [*load_shell_history_entries(project_root), entry][-_MAX_HISTORY_ENTRIES:]
     path.touch(mode=0o600, exist_ok=True)
     path.chmod(0o600)
-    with path.open("a", encoding="utf-8") as stream:
-        stream.write(entry.replace("\n", "\\n") + "\n")
+    with path.open("w", encoding="utf-8") as stream:
+        stream.writelines(item.replace("\n", "\\n") + "\n" for item in entries)
 
 
 def configure_shell_completion() -> None:

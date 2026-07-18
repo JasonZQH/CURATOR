@@ -8,10 +8,12 @@ from textual.widgets import Input
 import curator.tui.shell_app as shell_app_module
 import curator.shell.repl as repl_module
 from curator.providers.events import ProviderEvent, ProviderEventKind
-from curator.providers.redact import redact_error
+from curator.providers.redact import redact_error, redact_secrets
+from curator.shell.menus import proposal_menu
 from curator.shell.repl import ShellResponse, ShellState, handle_shell_input
 from curator.tui.shell_app import CuratorShellApp
 from curator.tui.format import render_provider_event
+from curator.tui.trust_screen import TrustScreen
 
 
 def test_tui_idle_ctrl_c_exits(tmp_path):
@@ -54,7 +56,10 @@ def test_tui_busy_esc_then_ctrl_c_waits_for_worker(monkeypatch, tmp_path):
             assert input_widget.disabled
             await pilot.press("escape")
             assert app.state.cancellation.cancelled
-            await pilot.press("ctrl+c")
+            assert not app.state.should_exit  # Esc interrupts, never exits
+            await pilot.press("ctrl+c")  # first Ctrl+C asks to confirm
+            assert not app._shutdown_requested
+            await pilot.press("ctrl+c")  # second Ctrl+C force-exits
             assert app._shutdown_requested
             release.set()
             for _ in range(100):
@@ -204,3 +209,153 @@ def test_provider_error_redaction_covers_bare_api_tokens() -> None:
 
     assert "sk-1234567890abcdef1234567890" not in redacted
     assert "[REDACTED]" in redacted
+
+
+def test_redact_secrets_scrubs_without_trailing_truncation() -> None:
+    """Verify redact_secrets removes credentials but, unlike redact_error, keeps the head."""
+    text = "keep this leading text " + "x" * 600 + " sk-abcdef0123456789abcdef"
+
+    scrubbed = redact_secrets(text)
+
+    assert scrubbed.startswith("keep this leading text")
+    assert "sk-abcdef0123456789abcdef" not in scrubbed
+    assert "[REDACTED]" in scrubbed
+
+
+def test_shell_history_file_and_load_stay_bounded(tmp_path):
+    """Verify shell history stops growing without bound on disk and on load."""
+    from curator.tui.prompt_input import (
+        _MAX_HISTORY_ENTRIES,
+        append_shell_history_entry,
+        history_path,
+        load_shell_history_entries,
+    )
+
+    (tmp_path / ".curator").mkdir()
+    for index in range(_MAX_HISTORY_ENTRIES + 25):
+        append_shell_history_entry(tmp_path, f"entry-{index}")
+
+    entries = load_shell_history_entries(tmp_path)
+    file_lines = history_path(tmp_path).read_text(encoding="utf-8").splitlines()
+    assert len(entries) == _MAX_HISTORY_ENTRIES
+    assert len(file_lines) == _MAX_HISTORY_ENTRIES
+    assert entries[-1] == f"entry-{_MAX_HISTORY_ENTRIES + 24}"
+
+
+def test_tui_transcript_stays_bounded(tmp_path):
+    """Verify the plain-text transcript keeps only a bounded tail during long provider runs."""
+    from curator.tui.shell_app import _MAX_TRANSCRIPT_ENTRIES
+
+    async def run() -> None:
+        app = CuratorShellApp(project_root=tmp_path)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.transcript = [f"old {index}" for index in range(_MAX_TRANSCRIPT_ENTRIES + 100)]
+            app._write("newest line")
+            assert len(app.transcript) == _MAX_TRANSCRIPT_ENTRIES
+            assert app.transcript[-1] == "newest line"
+
+    asyncio.run(run())
+
+
+def test_tui_cancellation_token_rearms_for_the_next_run(monkeypatch, tmp_path):
+    """Verify cancelling one run does not leave the shared token cancelled for later runs."""
+    (tmp_path / ".curator").mkdir()
+    observed_cancelled: list[bool] = []
+    release = threading.Event()
+
+    def dispatch(state, text):
+        """Record the token state each run observes; block the first run so it can be cancelled."""
+        observed_cancelled.append(state.cancellation.cancelled)
+        if text == "first":
+            release.wait(timeout=5)
+        return ShellResponse("done")
+
+    monkeypatch.setattr(shell_app_module, "handle_shell_input", dispatch)
+
+    async def run() -> None:
+        app = CuratorShellApp(project_root=tmp_path)
+        async with app.run_test() as pilot:
+            input_widget = app.query_one("#input", Input)
+            input_widget.value = "first"
+            await pilot.press("enter")
+            for _ in range(50):
+                await pilot.pause(0.02)
+                if observed_cancelled:
+                    break
+            assert observed_cancelled == [False]
+            await pilot.press("escape")
+            assert app.state.cancellation.cancelled
+            release.set()
+            for _ in range(100):
+                await pilot.pause(0.02)
+                if not app._busy:
+                    break
+            assert not app._busy
+            input_widget.value = "second"
+            await pilot.press("enter")
+            for _ in range(100):
+                await pilot.pause(0.02)
+                if len(observed_cancelled) == 2:
+                    break
+            assert len(observed_cancelled) == 2
+            assert observed_cancelled[1] is False
+
+    asyncio.run(run())
+
+
+def test_tui_typed_text_over_open_menu_is_not_discarded(monkeypatch, tmp_path):
+    """Verify typing a reply over an open proposal menu submits the text, not the highlighted option."""
+    (tmp_path / ".curator").mkdir()
+    captured: list[str] = []
+
+    def dispatch(state, text):
+        """Return a proposal menu for the first request; echo everything else."""
+        captured.append(text)
+        if text == "build a widget":
+            return ShellResponse("Proposal ready", menu=proposal_menu())
+        return ShellResponse("ok")
+
+    monkeypatch.setattr(shell_app_module, "handle_shell_input", dispatch)
+
+    async def run() -> None:
+        app = CuratorShellApp(project_root=tmp_path)
+        async with app.run_test() as pilot:
+            input_widget = app.query_one("#input", Input)
+            input_widget.value = "build a widget"
+            await pilot.press("enter")
+            for _ in range(50):
+                await pilot.pause(0.02)
+                if app._menu is not None:
+                    break
+            assert app._menu is not None
+            input_widget.value = "no, cancel that"
+            await pilot.press("enter")
+            for _ in range(50):
+                await pilot.pause(0.02)
+                if len(captured) == 2:
+                    break
+            assert captured[-1] == "no, cancel that"
+            assert app._menu is None
+
+    asyncio.run(run())
+
+
+def test_tui_trust_screen_esc_exits(monkeypatch, tmp_path):
+    """Verify Esc on the first-run trust modal exits, honoring its advertised 'Esc to exit'."""
+    monkeypatch.setattr(shell_app_module, "_should_check_trust", lambda: True)
+    monkeypatch.setattr(shell_app_module, "trust_decision", lambda _root: None)
+
+    async def run() -> None:
+        app = CuratorShellApp(project_root=tmp_path)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert isinstance(app.screen, TrustScreen)
+            await pilot.press("escape")
+            for _ in range(50):
+                await pilot.pause(0.02)
+                if app.state.should_exit:
+                    break
+            assert app.state.should_exit
+
+    asyncio.run(run())

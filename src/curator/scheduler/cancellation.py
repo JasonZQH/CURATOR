@@ -38,6 +38,20 @@ class CancellationToken:
             # scheduler observe cancellation at its next cooperative boundary.
             return
 
+    def reset(self) -> None:
+        """Re-arm the token for a new run, clearing any prior cancellation request.
+
+        A single ``ShellState`` reuses one token across every run it dispatches, so
+        the shell must call this at each new run boundary; otherwise a cancelled
+        run would leave the flag set and abort every later run before its first
+        step. Reset is distinct from ``bind`` on purpose: an early ``cancel`` for
+        the *current* run must still be replayed when that run binds.
+        """
+        with self._lock:
+            self._cancelled = False
+            self._task = None
+            self._loop = None
+
     def bind(self, task: asyncio.Task | None = None) -> None:
         """Bind the token and schedule cancellation if it was requested early."""
         bound_task = task or asyncio.current_task()
