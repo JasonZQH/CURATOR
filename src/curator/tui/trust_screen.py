@@ -18,8 +18,8 @@ class TrustScreen(ModalScreen[bool]):
     CSS = """
     TrustScreen { align: left top; background: ansi_default; }
     #trust-content { width: 100%; height: 100%; padding: 2 3; }
-    #trust-topline { height: 1; background: #d89b28; }
-    #trust-eyebrow { margin-top: 2; color: #d89b28; text-style: bold; }
+    #trust-topline { height: 1; background: #5b9bff; }
+    #trust-eyebrow { margin-top: 2; color: #5b9bff; text-style: bold; }
     #trust-path { margin-top: 1; color: $text; text-style: bold; }
     #trust-title { margin-top: 2; color: $text; text-style: bold; }
     #trust-body { width: 88%; margin-top: 1; color: $text-muted; }
@@ -40,8 +40,8 @@ class TrustScreen(ModalScreen[bool]):
         background: transparent;
     }
     #trust-options > .option-list--option-highlighted {
-        color: #fff7df;
-        background: #59400d;
+        color: #eaf1ff;
+        background: #24306a;
         text-style: bold;
     }
     #trust-footer { margin-top: 2; color: $text-muted; }

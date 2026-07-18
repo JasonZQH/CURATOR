@@ -20,6 +20,15 @@ def escape_markup(text: str) -> str:
     return escape(text)
 
 
+def user_echo(text: str) -> str:
+    """Return one submitted prompt line styled as a full-width highlight bar.
+
+    The row background is supplied by the log's fill rendering; here we set the
+    amber caret and bright message text that sit on top of it.
+    """
+    return f"[bold #5b9bff]›[/] [bold #c8d8ff]{escape_markup(text)}[/]"
+
+
 def render_provider_event(event: ProviderEvent) -> str:
     """Render one provider event with escaped text and semantic Rich color."""
     style = _EVENT_STYLES.get(event.kind, "white")

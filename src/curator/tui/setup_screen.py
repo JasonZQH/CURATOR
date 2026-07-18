@@ -15,7 +15,7 @@ from curator.shell.wizard_flow import Ask, Done, Probe, Say, SetupFlow, WizardRe
 class SetupScreen(Vertical):
     """Render setup in the prompt area without replacing the whole terminal."""
 
-    CSS = """
+    DEFAULT_CSS = """
     SetupScreen {
         dock: bottom;
         width: 100%;
@@ -23,10 +23,10 @@ class SetupScreen(Vertical):
         max-height: 45%;
         padding: 1 2 1 2;
         background: ansi_default;
-        border-top: solid #d89b28;
+        border-top: solid #5b9bff;
         display: none;
     }
-    #setup-kicker { color: #d89b28; text-style: bold; }
+    #setup-kicker { color: #5b9bff; text-style: bold; }
     #setup-log {
         height: auto;
         max-height: 8;
@@ -50,8 +50,8 @@ class SetupScreen(Vertical):
         background: transparent;
     }
     #setup-options > .option-list--option-highlighted {
-        color: #fff7df;
-        background: #59400d;
+        color: #eaf1ff;
+        background: #24306a;
         text-style: bold;
     }
     #setup-footer { margin-top: 1; color: $text-muted; }

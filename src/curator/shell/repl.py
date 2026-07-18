@@ -783,11 +783,16 @@ def _handle_evidence(state: ShellState) -> ShellResponse:
     return ShellResponse("\n".join(lines))
 
 
+def _exit_response(state: ShellState) -> ShellResponse:
+    """Mark the shell for exit and return the farewell response."""
+    state.should_exit = True
+    return ShellResponse("Bye.", should_exit=True)
+
+
 def _handle_slash_command(state: ShellState, text: str) -> ShellResponse:
     """Route one slash command to a shell action."""
-    if text == "/quit":
-        state.should_exit = True
-        return ShellResponse("Bye.", should_exit=True)
+    if text in {"/quit", "/exit"}:
+        return _exit_response(state)
     if text == "/init":
         return ShellResponse(apply_first_run_init(state.project_root))
     if text == "/setup":
@@ -889,7 +894,7 @@ _SLASH_DESCRIPTIONS = {
     "/gate off": "Start small requests immediately",
     "/provider add claude-code": "Connect Claude Code",
     "/provider add codex": "Connect Codex",
-    "/quit": "Exit the Curator shell",
+    "/quit": "Exit the shell — or just type quit / exit",
 }
 
 SLASH_COMMAND_SPECS: tuple[tuple[str, str], ...] = tuple(
@@ -1297,6 +1302,8 @@ def _handle_shell_input(state: ShellState, text: str) -> ShellResponse:
             return _handle_slash_command(state, stripped)
         except ProjectLockedError as error:
             return ShellResponse(str(error))
+    if lowered in {"quit", "exit"}:
+        return _exit_response(state)
     is_answer = lowered in {"yes", "y", "start", "no", "n", "cancel"} or lowered.startswith(
         "edit "
     )

@@ -33,7 +33,7 @@ classifiers = [
 ]
 dependencies = [
   "typer>=0.12",
-  "textual>=8.2,<9",
+  "textual>=8.2.8,<9",
   "rich>=13.7",
   "pydantic>=2.8",
   "PyYAML>=6.0",

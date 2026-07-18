@@ -7,7 +7,6 @@ from textual.widgets import OptionList
 from curator.shell.trust import trust_decision
 from curator.tui.setup_screen import SetupScreen
 from curator.tui.shell_app import CuratorShellApp
-from textual.widgets import Input
 
 
 def test_trust_screen_keeps_options_inside_the_dialog(tmp_path, monkeypatch):
@@ -67,10 +66,10 @@ def test_setup_replaces_the_prompt_area_instead_of_pushing_a_screen(tmp_path, mo
             setup = app.query_one("#setup-panel", SetupScreen)
             assert len(app.screen_stack) == 1
             assert setup.styles.display == "block"
-            assert app.query_one("#input", Input).styles.display == "none"
+            assert app.query_one("#footer").styles.display == "none"
             await pilot.press("down", "enter")
             await pilot.pause()
             assert setup.styles.display == "none"
-            assert app.query_one("#input", Input).styles.display == "block"
+            assert app.query_one("#footer").styles.display == "block"
 
     asyncio.run(run())
