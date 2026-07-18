@@ -122,7 +122,10 @@ class SetupFlow:
             picked = self.choices["pm"] if not value else self._provider_for_value(value)
             if picked is None:
                 return self._seat_prompt()
-            self.choices["engineer"] = self.choices["pm"]
+            # Compact setup collapses the two working seats into this one "Engineer"
+            # prompt: the pick binds the engineer (writer) seat it is labelled for, and
+            # the read-only reviewer mirrors it. Enter (= same as PM) makes all three equal.
+            self.choices["engineer"] = picked
             self.choices["reviewer"] = picked
             self.seat_index = len(_SEATS)
             self.stage = "confirm"
@@ -165,14 +168,11 @@ class SetupFlow:
         write_init_state(self.project_root)
         now = datetime.now(UTC)
         connection = connect_database(build_curator_paths(self.project_root).database)
-        lines = ["Setup complete."]
         try:
             initialize_database(connection)
             ensure_default_role_pool(connection, now=now)
             for provider, _ in self.choices.values():
-                result = add_provider_profile(connection, provider)
-                if result.message not in lines:
-                    lines.append(result.message)
+                add_provider_profile(connection, provider)
             for seat_key, role_instance_id, label, _ in _SEATS:
                 provider, _ = self.choices[seat_key]
                 insert_role_provider_binding(
@@ -186,8 +186,7 @@ class SetupFlow:
                         updated_at=now,
                     ),
                 )
-                lines.append(f"Bound {label} ({role_instance_id}) → {provider}")
         finally:
             connection.close()
-        lines.append("Mode: live — type what you want to work on.")
-        return WizardResult(True, "\n".join(lines))
+        seats = " · ".join(f"{label}: {self.choices[key][0]}" for key, _, label, _ in _SEATS)
+        return WizardResult(True, f"Setup complete. {seats}. Mode: live.")
