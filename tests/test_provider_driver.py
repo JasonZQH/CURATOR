@@ -27,14 +27,26 @@ class ScriptedDriver(SubprocessDriver):
 
     provider_name = ProviderName.CODEX
 
-    def __init__(self, project_root, scenario: str, timeout_seconds: int = 30) -> None:
+    def __init__(
+        self,
+        project_root,
+        scenario: str,
+        timeout_seconds: int = 30,
+        prompt_size: int = 0,
+    ) -> None:
         """Bind the driver to one scripted scenario."""
         super().__init__(project_root, timeout_seconds=timeout_seconds)
         self.scenario = scenario
+        self.prompt_size = prompt_size
 
     def build_argv(self, spec, request) -> list[str]:
         """Return the fake CLI invocation for this scenario."""
         return [sys.executable, str(_FIXTURE), "--scenario", self.scenario]
+
+    def build_prompt(self, spec, request) -> str:
+        """Return a configurable stdin payload for provider boundary tests."""
+        _ = spec, request
+        return "x" * self.prompt_size
 
     def parse_event(self, line, provider_run_id, sequence):
         """Map scripted JSONL lines to provider events, dropping garbage."""
@@ -134,6 +146,16 @@ def test_subprocess_driver_times_out_and_kills_process(tmp_path):
 
     with pytest.raises(TimeoutError):
         _run(ScriptedDriver(tmp_path, "hang", timeout_seconds=1), [])
+
+    assert time.monotonic() - started < 15
+
+
+def test_subprocess_driver_timeout_covers_blocked_stdin_write(tmp_path):
+    """Verify a provider that never reads stdin still respects the timeout budget."""
+    started = time.monotonic()
+
+    with pytest.raises(TimeoutError):
+        _run(ScriptedDriver(tmp_path, "hang", timeout_seconds=1, prompt_size=2_000_000), [])
 
     assert time.monotonic() - started < 15
 

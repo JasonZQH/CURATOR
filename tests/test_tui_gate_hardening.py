@@ -1,6 +1,7 @@
 """Verify full-screen input, startup gating, and interruption behavior."""
 
 import asyncio
+from contextlib import contextmanager
 import threading
 
 from textual.widgets import Input
@@ -14,6 +15,39 @@ from curator.shell.repl import ShellResponse, ShellState, handle_shell_input
 from curator.tui.shell_app import CuratorShellApp
 from curator.tui.format import render_provider_event
 from curator.tui.trust_screen import TrustScreen
+
+
+def test_resume_and_revise_enter_project_lock_before_reading_pause(monkeypatch, tmp_path):
+    """Verify pause-mutating shell commands serialize their complete operation."""
+    lock_events: list[str] = []
+
+    @contextmanager
+    def recording_lock(_project_root):
+        """Record the project-lock lifetime around a shell mutation."""
+        lock_events.append("enter")
+        try:
+            yield
+        finally:
+            lock_events.append("exit")
+
+    class DummyConnection:
+        """Provide the close method required by the shell's read path."""
+
+        def close(self) -> None:
+            """Close the no-op test connection."""
+
+    monkeypatch.setattr(repl_module, "project_write_lock", recording_lock)
+    monkeypatch.setattr(repl_module, "_database_exists", lambda _state: True)
+    monkeypatch.setattr(repl_module, "_connect_state", lambda _state: DummyConnection())
+    monkeypatch.setattr(repl_module, "load_latest_pause_record", lambda *_args: None)
+
+    state = ShellState(project_root=tmp_path)
+    assert "No paused loop" in handle_shell_input(state, "/resume answer").text
+    assert lock_events == ["enter", "exit"]
+
+    lock_events.clear()
+    assert "No paused loop" in handle_shell_input(state, "/revise new scope").text
+    assert lock_events == ["enter", "exit"]
 
 
 def test_tui_idle_ctrl_c_exits(tmp_path):

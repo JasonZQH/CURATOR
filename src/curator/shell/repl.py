@@ -1146,6 +1146,14 @@ def _handle_scope_change(state: ShellState, text: str, pause_id: str) -> ShellRe
 
 
 def _handle_resume(state: ShellState, message: str) -> ShellResponse:
+    """Answer the latest pause while serializing all related ledger writes."""
+    if not _database_exists(state):
+        return _handle_resume_unlocked(state, message)
+    with project_write_lock(state.project_root):
+        return _handle_resume_unlocked(state, message)
+
+
+def _handle_resume_unlocked(state: ShellState, message: str) -> ShellResponse:
     """Answer the latest pause, resolve it, and resume when supported."""
     cleaned = message.strip()
     loop_run_id: str | None = None
@@ -1194,6 +1202,14 @@ def _handle_resume(state: ShellState, message: str) -> ShellResponse:
 
 
 def _handle_revise(state: ShellState, message: str) -> ShellResponse:
+    """Draft a revised goal proposal while serializing its ledger and file writes."""
+    if not _database_exists(state):
+        return _handle_revise_unlocked(state, message)
+    with project_write_lock(state.project_root):
+        return _handle_revise_unlocked(state, message)
+
+
+def _handle_revise_unlocked(state: ShellState, message: str) -> ShellResponse:
     """Draft a revised goal proposal from the latest pause."""
     cleaned = message.strip()
     if not cleaned:

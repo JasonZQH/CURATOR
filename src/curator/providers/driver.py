@@ -209,34 +209,30 @@ class SubprocessDriver:
 
         stderr_task: asyncio.Task[bytes] | None = None
         try:
-            if process.stdin is not None:
-                process.stdin.write(prompt.encode("utf-8"))
-                await process.stdin.drain()
-                process.stdin.close()
             async with asyncio.timeout(self.timeout_seconds):
                 stderr_task = asyncio.create_task(_read_stderr())
+                if process.stdin is not None:
+                    process.stdin.write(prompt.encode("utf-8"))
+                    await process.stdin.drain()
+                    process.stdin.close()
                 await _read_stdout()
                 stderr_bytes = await stderr_task
                 returncode = await process.wait()
         except TimeoutError as error:
             await self._terminate(process)
-            if stderr_task is not None:
-                stderr_task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await stderr_task
             raise TimeoutError(
                 f"Provider run timed out after {self.timeout_seconds}s"
             ) from error
         except asyncio.CancelledError:
             await self._terminate(process)
-            if stderr_task is not None:
-                stderr_task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await stderr_task
             raise ProviderCancelledError("Provider run cancelled by user.") from None
         finally:
             if process.returncode is None:
                 await self._terminate(process)
+            if stderr_task is not None and not stderr_task.done():
+                stderr_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await stderr_task
             with suppress(ProcessLookupError):
                 await process.wait()
 
