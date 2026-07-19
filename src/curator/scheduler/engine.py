@@ -902,13 +902,19 @@ async def _execute_provider_step(
                 {"scheduler_decision": "pending"},
             ),
         )
-        result = await run_harness_async(
-            spec,
-            driver,
-            provider_request,
-            created_at=step_started_at,
-            on_event=recorder,
-        )
+        # Coalesce the per-event ledger writes: streaming providers emit many
+        # OUTPUT_CHUNK/lifecycle events, and each insert_event would otherwise COMMIT
+        # (fsync) on the event-loop thread. One transaction commits them once at step
+        # end. The RUNNING iteration/provider_run above are committed before this block
+        # so crash recovery still sees them; only the streamed transcript rolls back.
+        with transaction(connection):
+            result = await run_harness_async(
+                spec,
+                driver,
+                provider_request,
+                created_at=step_started_at,
+                on_event=recorder,
+            )
         runtime_decision = _decision_for_provider_signal(result) or decide_runtime(
             step, result, role_contracts=ctx.role_contracts
         )
