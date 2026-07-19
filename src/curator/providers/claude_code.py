@@ -9,7 +9,7 @@ from curator.harness.workspace import WorkspaceBaseline, capture_baseline
 from curator.providers.cli_common import build_cli_provider_response
 from curator.providers.contracts import ProviderRunRequest, ProviderRunResponse
 from curator.providers.driver import SubprocessDriver
-from curator.providers.events import ProviderEvent, ProviderEventKind
+from curator.providers.events import OUTPUT_CHUNK_MAX_CHARS, ProviderEvent, ProviderEventKind
 from curator.runtime.action_policy import ActionPolicy
 from curator.runtime.permissions import claude_permission_args
 
@@ -74,7 +74,7 @@ class ClaudeCodeDriver(SubprocessDriver):
                 kind=ProviderEventKind.OUTPUT_CHUNK,
                 provider_run_id=provider_run_id,
                 sequence=sequence,
-                payload={"type": message_type, "text": text[:4096]},
+                payload={"type": message_type, "text": text[:OUTPUT_CHUNK_MAX_CHARS]},
             )
         if message_type == "result":
             result_text = payload.get("result")

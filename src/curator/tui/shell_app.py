@@ -375,13 +375,8 @@ class CuratorShellApp(App[None]):
             self._move_history(-1 if event.key == "up" else 1)
             return
         if event.key == "tab":
-            prefix = self._completion_prefix or input_widget.value
-            matches = completion_matches(prefix)
-            if matches:
+            if self._accept_palette():
                 event.prevent_default()
-                input_widget.value = matches[self._completion_index % len(matches)]
-                input_widget.cursor_position = len(input_widget.value)
-                self._completion_index += 1
             return
         if event.key in {"shift+enter", "ctrl+j"}:
             event.prevent_default()
@@ -390,17 +385,18 @@ class CuratorShellApp(App[None]):
                 input_widget.value = ""
                 input_widget.placeholder = "Continuation line… press Enter to submit"
 
-    def _accept_palette(self) -> None:
-        """Copy the highlighted slash command into the input prompt."""
+    def _accept_palette(self) -> bool:
+        """Copy the highlighted slash command into the input; return whether one applied."""
         prefix = self._completion_prefix or self.query_one("#input", Input).value
         matches = completion_matches(prefix)
         if not matches:
-            return
+            return False
         value = matches[self._completion_index % len(matches)]
         input_widget = self.query_one("#input", Input)
         input_widget.value = value
         input_widget.cursor_position = len(input_widget.value)
         self._completion_index += 1
+        return True
 
     def _move_history(self, direction: int) -> None:
         """Move the TUI input through persisted command history."""

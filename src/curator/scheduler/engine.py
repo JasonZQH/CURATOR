@@ -62,6 +62,7 @@ from curator.providers.redact import redact_error, redact_secrets
 from curator.providers.base import Provider
 from curator.providers.driver import ProviderDriver, driver_for_provider
 from curator.providers.events import (
+    OUTPUT_CHUNK_MAX_CHARS,
     ProviderEvent,
     ProviderEventCallback,
     ProviderEventKind,
@@ -207,7 +208,7 @@ def _ledger_event_payload(event: ProviderEvent) -> dict:
     """
     payload = {"kind": event.kind.value, "label": event.label}
     if event.kind is ProviderEventKind.OUTPUT_CHUNK:
-        payload["text"] = redact_secrets(str(event.payload.get("text", "")))[:4096]
+        payload["text"] = redact_secrets(str(event.payload.get("text", "")))[:OUTPUT_CHUNK_MAX_CHARS]
     return payload
 
 
@@ -417,13 +418,13 @@ def _pause_reason_for_provider_error(provider_error: Exception) -> str | None:
     if isinstance(provider_error, ProviderCancelledError):
         return "Provider was cancelled; pausing for user input."
     error_kind = classify_provider_error(provider_error)
-    if error_kind.value == "invalid_output":
+    if error_kind is ProviderErrorKind.INVALID_OUTPUT:
         return "Provider invalid output; pausing for user input."
-    if error_kind.value == "permission_denied":
+    if error_kind is ProviderErrorKind.PERMISSION_DENIED:
         return "Provider permission denied; pausing for user input."
-    if error_kind.value == "timeout":
+    if error_kind is ProviderErrorKind.TIMEOUT:
         return "Provider timed out; pausing for user input."
-    if error_kind.value == "cancelled":
+    if error_kind is ProviderErrorKind.CANCELLED:
         return "Provider was cancelled; pausing for user input."
     # An untyped exception classified as provider_unavailable is an unexpected provider
     # bug, not a recognized recoverable failure: return None so the run STOP_FAILEDs
@@ -544,14 +545,14 @@ def _provider_response_payload(result) -> dict:
 def _provider_stop_metadata(result, provider_error: Exception | None) -> dict[str, str]:
     """Return durable actor and reason metadata for provider stop paths."""
     if provider_error is not None:
-        kind = classify_provider_error(provider_error).value
-        if kind == "cancelled":
+        kind = classify_provider_error(provider_error)
+        if kind is ProviderErrorKind.CANCELLED:
             return {
                 "stopped_by": "USER",
                 "stop_reason": "USER_INTERRUPTED",
                 "error_message": redact_error(str(provider_error)),
             }
-        if kind == "timeout":
+        if kind is ProviderErrorKind.TIMEOUT:
             return {
                 "stopped_by": "SYSTEM",
                 "stop_reason": "TIMEOUT",
