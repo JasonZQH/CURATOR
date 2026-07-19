@@ -50,10 +50,3 @@ def render_banner(project_root: Path | str) -> str:
     if branch is not None:
         identity = f"{identity} · git:{branch}"
     return f"{ASCII_BANNER}\n\n  {identity}"
-
-
-def render_whats_new() -> str:
-    """Render the concise release highlights shown once at TUI startup."""
-    lines = [SLOGAN, "", "What’s new:"]
-    lines.extend(f"  • {item}" for item in WHATS_NEW)
-    return "\n".join(lines)

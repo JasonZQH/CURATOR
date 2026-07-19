@@ -7,7 +7,6 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from collections.abc import Callable
 
 from curator.core.paths import build_curator_paths
 from curator.harness.verifier import discover_verification_commands
@@ -254,17 +253,6 @@ def run_preflight(project_root: Path | str) -> PreflightReport:
     if pause is not None:
         checks.append(pause)
     return PreflightReport(checks=tuple(checks))
-
-
-def run_preflight_streaming(
-    project_root: Path | str,
-    on_check: Callable[[PreflightCheck], None],
-) -> PreflightReport:
-    """Run startup checks and emit each completed check to a UI callback."""
-    report = run_preflight(project_root)
-    for check in report.checks:
-        on_check(check)
-    return report
 
 
 def render_preflight(report: PreflightReport) -> str:
