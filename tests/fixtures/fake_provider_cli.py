@@ -34,6 +34,20 @@ def main() -> int:
         print(json.dumps({"kind": "tool_call", "label": "thinking"}), flush=True)
         time.sleep(60)
         return 0
+    if args.scenario == "flood_then_read":
+        # Flood stdout beyond the OS pipe buffer BEFORE reading stdin. A driver that
+        # drains stdin before it starts reading stdout deadlocks: this child blocks
+        # writing stdout (nobody reading it) while the parent blocks writing stdin
+        # (this child not reading it). A concurrent-reader driver drains stdout and
+        # both sides make progress.
+        for index in range(6000):
+            sys.stdout.write(
+                json.dumps({"kind": "output_chunk", "label": "", "text": f"chunk-{index:05d}"}) + "\n"
+            )
+        sys.stdout.flush()
+        sys.stdin.read()
+        print(json.dumps({"kind": "tool_call", "label": "flood-complete"}), flush=True)
+        return 0
     if args.scenario == "spawn_hang":
         child = subprocess.Popen(
             [sys.executable, "-c", "import time; time.sleep(60)"],

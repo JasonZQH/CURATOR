@@ -160,6 +160,24 @@ def test_subprocess_driver_timeout_covers_blocked_stdin_write(tmp_path):
     assert time.monotonic() - started < 15
 
 
+def test_subprocess_driver_reads_stdout_while_feeding_stdin(tmp_path):
+    """Verify a provider that floods stdout before reading stdin does not deadlock the stdin drain."""
+    events: list[ProviderEvent] = []
+    started = time.monotonic()
+
+    response = _run(
+        ScriptedDriver(tmp_path, "flood_then_read", timeout_seconds=5, prompt_size=200_000),
+        events,
+    )
+
+    assert response.status.value == "succeeded"
+    # A deadlock would only unblock at the timeout; completing well under it proves the
+    # driver reads stdout concurrently with writing stdin.
+    assert time.monotonic() - started < 4
+    labels = [event.label for event in events if event.kind is ProviderEventKind.TOOL_CALL]
+    assert "flood-complete" in labels
+
+
 def test_subprocess_driver_cancellation_terminates_process(tmp_path):
     """Verify cancelling the run raises the typed cancellation error."""
 

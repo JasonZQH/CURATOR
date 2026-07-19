@@ -207,15 +207,31 @@ class SubprocessDriver:
             assert process.stderr is not None
             return await process.stderr.read()
 
+        async def _write_stdin() -> None:
+            """Feed the prompt to the child and close stdin, tolerating an early exit."""
+            if process.stdin is None:
+                return
+            try:
+                process.stdin.write(prompt.encode("utf-8"))
+                await process.stdin.drain()
+            except (BrokenPipeError, ConnectionResetError):
+                # The child stopped reading before consuming the prompt; the stdout/stderr
+                # readers and the exit code surface the real reason.
+                pass
+            finally:
+                with suppress(BrokenPipeError, ConnectionResetError):
+                    process.stdin.close()
+
         stderr_task: asyncio.Task[bytes] | None = None
+        stdout_task: asyncio.Task[None] | None = None
         try:
             async with asyncio.timeout(self.timeout_seconds):
                 stderr_task = asyncio.create_task(_read_stderr())
-                if process.stdin is not None:
-                    process.stdin.write(prompt.encode("utf-8"))
-                    await process.stdin.drain()
-                    process.stdin.close()
-                await _read_stdout()
+                stdout_task = asyncio.create_task(_read_stdout())
+                # Feed stdin concurrently with reading stdout so a provider that emits
+                # output before consuming its prompt cannot deadlock the drain.
+                await _write_stdin()
+                await stdout_task
                 stderr_bytes = await stderr_task
                 returncode = await process.wait()
         except TimeoutError as error:
@@ -229,10 +245,11 @@ class SubprocessDriver:
         finally:
             if process.returncode is None:
                 await self._terminate(process)
-            if stderr_task is not None and not stderr_task.done():
-                stderr_task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await stderr_task
+            for task in (stdout_task, stderr_task):
+                if task is not None and not task.done():
+                    task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await task
             with suppress(ProcessLookupError):
                 await process.wait()
 
