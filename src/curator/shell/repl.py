@@ -8,11 +8,13 @@ from typing import Callable
 from curator.app import (
     resume_goal_loop,
     start_goal_loop,
+    sync_goal_run_status,
 )
 from curator.core.enums import (
     ApprovalKind,
     ApprovalStatus,
     DiscoveryStatus,
+    LoopStatus,
     PauseStatus,
     ProviderBindingStatus,
 )
@@ -58,6 +60,7 @@ from curator.runtime.workbench import (
 from curator.providers.events import ProviderEvent, ProviderEventKind
 from curator.providers.setup import add_provider_profile
 from curator.scheduler.snapshots import load_latest_workflow_snapshot
+from curator.scheduler.step_writer import write_loop_completion
 from curator.shell.intent import detect_cli_command, render_command_hint
 from curator.shell.menus import MenuSpec, proposal_menu
 from curator.shell.wizard import run_setup_wizard
@@ -90,6 +93,7 @@ from curator.state.repositories import (
     load_provider_binding_for_role,
     load_provider_profile,
     load_role_instances,
+    load_loop_run,
     load_loop_runs_for_session,
     load_sessions_for_project,
 )
@@ -1054,6 +1058,13 @@ def _handle_cancel_goal_unlocked(state: ShellState) -> ShellResponse:
                         update={"status": PauseStatus.RESOLVED, "resolved_at": now}
                     ),
                 )
+                # Mark the loop terminally cancelled and propagate that to the goal. Otherwise
+                # the loop stays PAUSED with no open pause, and startup recovery treats it as a
+                # crash and recreates an interrupted pause — resurrecting the cancelled run.
+                loop_run = load_loop_run(connection, pause.loop_run_id)
+                if loop_run is not None:
+                    write_loop_completion(connection, loop_run, LoopStatus.CANCELLED, now)
+                    sync_goal_run_status(connection, loop_run.id)
                 state.pending_goal = None
                 return ShellResponse("Paused loop cancelled.")
         finally:

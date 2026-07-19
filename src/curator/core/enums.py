@@ -199,6 +199,7 @@ class LoopStatus(str, Enum):
     PAUSED = "paused"
     DONE = "done"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class GoalStatus(str, Enum):

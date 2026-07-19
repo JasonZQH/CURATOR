@@ -106,6 +106,8 @@ def _goal_status_for_loop(loop_status: LoopStatus) -> GoalStatus:
         return GoalStatus.DONE
     if loop_status is LoopStatus.PAUSED:
         return GoalStatus.PAUSED
+    if loop_status is LoopStatus.CANCELLED:
+        return GoalStatus.CANCELLED
     if loop_status is LoopStatus.FAILED:
         return GoalStatus.FAILED
     return GoalStatus.RUNNING
@@ -203,7 +205,7 @@ def _start_goal_loop_unlocked(
             cancellation=cancellation,
         )
         loop_run = load_loop_runs_for_session(connection, created_session_id)[-1]
-        _sync_goal_run_status(connection, loop_run.id)
+        sync_goal_run_status(connection, loop_run.id)
         return load_workflow_snapshot(connection, created_session_id)
     finally:
         connection.close()
@@ -269,7 +271,7 @@ def _resume_goal_loop_unlocked(
         if not resumed:
             return None
 
-        _sync_goal_run_status(connection, pause.loop_run_id)
+        sync_goal_run_status(connection, pause.loop_run_id)
         session = load_session_for_loop(connection, pause.loop_run_id)
         if session is None:
             return None
@@ -278,8 +280,8 @@ def _resume_goal_loop_unlocked(
         connection.close()
 
 
-def _sync_goal_run_status(connection, loop_run_id: str) -> None:
-    """Update the goal run status after a resume changes the loop status."""
+def sync_goal_run_status(connection, loop_run_id: str) -> None:
+    """Sync the goal run and identity status to the loop's current status (start/resume/cancel)."""
     loop_run = load_loop_run(connection, loop_run_id)
     goal_run = load_goal_run_for_loop(connection, loop_run_id)
     if loop_run is None or goal_run is None:

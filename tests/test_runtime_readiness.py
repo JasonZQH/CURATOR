@@ -22,11 +22,13 @@ from curator.runtime.action_policy import ActionPolicy, ActionRequest, ActionTyp
 from curator.scheduler.snapshots import load_latest_workflow_snapshot
 from curator.shell.repl import ShellState, handle_shell_input
 from curator.state.db import connect_database, initialize_database
+from curator.scheduler.recovery import reconcile_project
 from curator.state.repositories import (
     load_context_packages_for_run,
     load_goal_draft_for_discovery,
     load_latest_discovery_session,
     load_latest_pause_record,
+    load_loop_run,
     load_pause_records_for_run,
     load_provider_runs_for_run,
     load_resume_events_for_pause,
@@ -260,6 +262,32 @@ def test_cancel_resolves_paused_loop_cursor(tmp_path):
     assert resume_events[0].action == "cancel"
     assert latest_pause is None
     assert "Paused:\n- none" in node.text
+
+
+def test_cancel_is_terminal_and_not_resurrected_by_recovery(tmp_path):
+    """Verify a /cancel'd paused loop is terminal so the next-launch reconcile does not resurrect it.
+
+    /cancel used to only resolve the pause record while leaving the loop PAUSED; startup recovery
+    then treated 'paused with no open pause' as a crash and recreated an interrupted pause. The
+    loop must reach a terminal CANCELLED status that reconcile ignores.
+    """
+    revision_id = _accepted_goal_revision(tmp_path)
+    snapshot = start_goal_loop(tmp_path, revision_id, provider=AlwaysFailValidationProvider())
+    loop_run = snapshot.loop_runs[-1]
+    assert loop_run.status is LoopStatus.PAUSED  # the loop paused waiting for the user
+
+    handle_shell_input(ShellState(project_root=tmp_path), "/cancel")
+
+    # The next-launch reconcile must not treat the cancelled loop as an interrupted crash.
+    assert reconcile_project(tmp_path) == 0
+
+    connection = connect_database(build_curator_paths(tmp_path).database)
+    initialize_database(connection)
+    recovered_loop = load_loop_run(connection, loop_run.id)
+    latest_pause = load_latest_pause_record(connection, loop_run.id)
+    connection.close()
+    assert recovered_loop.status is LoopStatus.CANCELLED
+    assert latest_pause is None  # no interrupted pause was recreated
 
 
 def test_provider_run_contract_and_ledger_capture_scheduler_owned_decisions(tmp_path):
