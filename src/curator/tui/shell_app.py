@@ -1,5 +1,6 @@
 """Run the full-screen Curator shell with native onboarding and menus."""
 
+import sqlite3
 import time
 from pathlib import Path
 
@@ -42,6 +43,9 @@ _MAX_SUGGESTIONS = 6
 # Bound the plain-text transcript mirror so a long streamed run cannot grow it without
 # limit (the on-screen log is already capped); mirrors the _history[-100:] cap.
 _MAX_TRANSCRIPT_ENTRIES = 2000
+# How long a forced exit waits for a cancelled worker to unwind and release the project
+# lock before giving up and letting the next-launch reconcile recover the run.
+_SHUTDOWN_DRAIN_SECONDS = 5.0
 
 
 class CuratorShellApp(App[None]):
@@ -98,6 +102,7 @@ class CuratorShellApp(App[None]):
         self._menu: MenuSpec | None = None
         self._menu_index = 0
         self._trust_required = _should_check_trust()
+        self._status_connection: sqlite3.Connection | None = None
 
     def compose(self) -> ComposeResult:
         """Compose the transcript, overlays, input, and footer chrome."""
@@ -266,28 +271,39 @@ class CuratorShellApp(App[None]):
         root = self.state.project_root
         mode = resolve_mode_for_project(root)
         parts = [mode.label]
-        database = build_curator_paths(root).database
-        if database.exists():
-            connection = connect_database(database)
-            try:
-                initialize_database(connection)
-                seats = (
-                    ("pm", "maindeck.default"),
-                    ("eng", "writer.default"),
-                    ("rev", "reviewer.default"),
-                )
-                bound: dict[str, str] = {}
-                for label, seat in seats:
-                    binding = load_provider_binding_for_role(connection, seat)
-                    bound[label] = binding.provider_profile_id if binding else "unbound"
-                    parts.append(f"{label}:{bound[label]}")
-            finally:
-                connection.close()
+        connection = self._status_ledger_connection()
+        if connection is not None:
+            seats = (
+                ("pm", "maindeck.default"),
+                ("eng", "writer.default"),
+                ("rev", "reviewer.default"),
+            )
+            for label, seat in seats:
+                binding = load_provider_binding_for_role(connection, seat)
+                parts.append(f"{label}:{binding.provider_profile_id if binding else 'unbound'}")
         parts.extend(("gate:on" if self.state.gate_mode else "gate:off", root.name))
         text = " · ".join(parts)
         if open_pause_exists(root):
             text = f"{text}  ⏸ paused — /resume · /revise · /cancel"
         return text
+
+    def _status_ledger_connection(self) -> sqlite3.Connection | None:
+        """Return a cached read connection to the project ledger, initialized once.
+
+        The status bar refreshes after every interaction, so opening a fresh connection
+        and re-running the whole schema script each time is pure waste. Cache one
+        connection (created on the UI thread and only ever read from here); its discrete
+        autocommit SELECTs still observe the latest committed bindings.
+        """
+        if self._status_connection is not None:
+            return self._status_connection
+        database = build_curator_paths(self.state.project_root).database
+        if not database.exists():
+            return None
+        connection = connect_database(database)
+        initialize_database(connection)
+        self._status_connection = connection
+        return connection
 
     def _working_line(self) -> str:
         """Return the amber working indicator shown just above the input."""
@@ -576,20 +592,34 @@ class CuratorShellApp(App[None]):
             self.run_worker(self._wait_for_worker_and_reconcile, thread=True, exclusive=False, group="shutdown")
 
     def _wait_for_worker_and_reconcile(self) -> None:
-        """Wait up to five seconds, reconcile, and then close the TUI."""
-        deadline = time.monotonic() + 5
+        """Wait for the cancelled worker to unwind, reconcile if it released the project, then exit.
+
+        Reconcile only runs once the dispatch worker has cleared ``_busy`` — which happens
+        strictly after it releases the per-thread project lock. Reconciling while that worker
+        still owns the lock would raise ProjectLockedError (this runs on a different thread) and
+        would race a run that is genuinely still live; a worker still stuck at the deadline is
+        left to the next-launch reconcile instead.
+        """
+        deadline = time.monotonic() + _SHUTDOWN_DRAIN_SECONDS
         while self._busy and time.monotonic() < deadline:
             time.sleep(0.05)
-        try:
-            reconcile_project(self.state.project_root)
-        except Exception as error:
-            self.call_from_thread(self._write, recoverable_error_message(self.state.project_root, "interrupt reconciliation", error))
+        if not self._busy:
+            try:
+                reconcile_project(self.state.project_root)
+            except Exception as error:
+                self.call_from_thread(self._write, recoverable_error_message(self.state.project_root, "interrupt reconciliation", error))
         self.call_from_thread(self._request_exit)
 
     def _request_exit(self) -> None:
         """Mark the shell exited before closing the Textual application."""
         self.state.should_exit = True
         self.exit()
+
+    def on_unmount(self) -> None:
+        """Release the cached status ledger connection when the app closes."""
+        if self._status_connection is not None:
+            self._status_connection.close()
+            self._status_connection = None
 
 
 def run_shell_app(project_root: Path | str, gate: bool = True) -> None:

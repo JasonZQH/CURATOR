@@ -105,6 +105,112 @@ def test_tui_busy_esc_then_ctrl_c_waits_for_worker(monkeypatch, tmp_path):
     asyncio.run(run())
 
 
+def test_forced_exit_skips_reconcile_while_worker_still_holds_lock(tmp_path, monkeypatch):
+    """Verify a stuck run (still holding the project lock) is not reconciled cross-thread on forced exit.
+
+    Two-stage Ctrl+C spawns a shutdown worker; it must not call reconcile_project while the
+    still-busy dispatch worker owns the per-thread project lock (which raises ProjectLockedError
+    and would surface a misleading reconciliation error). The interrupted run is left for the
+    next-launch reconcile instead.
+    """
+    from curator.runtime.lockfile import project_write_lock
+
+    monkeypatch.setattr(shell_app_module, "_SHUTDOWN_DRAIN_SECONDS", 0.3)
+    reconcile_attempts = {"n": 0}
+    real_reconcile = shell_app_module.reconcile_project
+
+    def spy_reconcile(root):
+        """Count and delegate each forced-exit reconcile attempt."""
+        reconcile_attempts["n"] += 1
+        return real_reconcile(root)
+
+    monkeypatch.setattr(shell_app_module, "reconcile_project", spy_reconcile)
+
+    lock_held = threading.Event()
+    release = threading.Event()
+
+    def stuck_dispatch(_state, _text):
+        """Hold the project lock (like a running goal) until the test releases it."""
+        with project_write_lock(tmp_path):
+            lock_held.set()
+            release.wait(timeout=5)
+        return ShellResponse("done")
+
+    monkeypatch.setattr(shell_app_module, "handle_shell_input", stuck_dispatch)
+
+    async def run() -> None:
+        app = CuratorShellApp(project_root=tmp_path)
+        async with app.run_test() as pilot:
+            input_widget = app.query_one("#input", Input)
+            input_widget.value = "run"
+            await pilot.press("enter")
+            assert lock_held.wait(timeout=5)
+            reconcile_attempts["n"] = 0  # ignore any startup reconcile; count only the forced-exit path
+            await pilot.press("ctrl+c")  # first Ctrl+C confirms
+            await pilot.press("ctrl+c")  # second spawns the shutdown worker
+            for _ in range(150):
+                await pilot.pause(0.02)
+                if app.state.should_exit:
+                    break
+            release.set()
+            assert app.state.should_exit
+            assert reconcile_attempts["n"] == 0
+
+    asyncio.run(run())
+
+
+def test_forced_exit_reconciles_once_the_worker_releases_the_lock(tmp_path, monkeypatch):
+    """Verify forced exit still reconciles when the cancelled worker unwinds before the deadline.
+
+    Guards the #9 fix against over-skipping: once the dispatch worker clears _busy (and has
+    released the project lock), the forced-exit reconcile must run.
+    """
+    from curator.runtime.lockfile import project_write_lock
+
+    monkeypatch.setattr(shell_app_module, "_SHUTDOWN_DRAIN_SECONDS", 2.0)
+    reconcile_attempts = {"n": 0}
+    real_reconcile = shell_app_module.reconcile_project
+
+    def spy_reconcile(root):
+        """Count and delegate each forced-exit reconcile attempt."""
+        reconcile_attempts["n"] += 1
+        return real_reconcile(root)
+
+    monkeypatch.setattr(shell_app_module, "reconcile_project", spy_reconcile)
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def releasable_dispatch(_state, _text):
+        """Hold the project lock briefly, then release it like a run that unwinds on cancel."""
+        with project_write_lock(tmp_path):
+            started.set()
+            release.wait(timeout=5)
+        return ShellResponse("done")
+
+    monkeypatch.setattr(shell_app_module, "handle_shell_input", releasable_dispatch)
+
+    async def run() -> None:
+        app = CuratorShellApp(project_root=tmp_path)
+        async with app.run_test() as pilot:
+            input_widget = app.query_one("#input", Input)
+            input_widget.value = "run"
+            await pilot.press("enter")
+            assert started.wait(timeout=5)
+            reconcile_attempts["n"] = 0  # count only the forced-exit path
+            await pilot.press("ctrl+c")  # first Ctrl+C confirms
+            await pilot.press("ctrl+c")  # second spawns the shutdown worker
+            release.set()  # the worker unwinds and releases the lock
+            for _ in range(200):
+                await pilot.pause(0.02)
+                if app.state.should_exit:
+                    break
+            assert app.state.should_exit
+            assert reconcile_attempts["n"] >= 1
+
+    asyncio.run(run())
+
+
 def test_tui_startup_gate_releases_after_preflight(monkeypatch, tmp_path):
     """Verify startup disables input until the worker finishes checks."""
     started = threading.Event()

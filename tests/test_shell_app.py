@@ -20,6 +20,38 @@ async def _submit_and_wait(app, pilot, text: str, expect: str) -> None:
     raise AssertionError(f"transcript never contained: {expect!r}")
 
 
+def test_status_refresh_does_not_reinitialize_the_ledger_each_time(tmp_path, monkeypatch):
+    """Verify each interaction-driven status refresh does not re-run schema initialization.
+
+    _refresh_status runs after every response, every Shift+Tab, and setup finish; re-executing
+    the whole schema script (plus a fresh connection) on the UI thread each time adds avoidable
+    latency to every interaction.
+    """
+    import curator.tui.shell_app as shell_app_module
+
+    enable_live_mode(tmp_path)
+    init_calls = {"n": 0}
+    real_init = shell_app_module.initialize_database
+
+    def counting_init(connection):
+        """Count each full schema initialization triggered by the status bar."""
+        init_calls["n"] += 1
+        return real_init(connection)
+
+    monkeypatch.setattr(shell_app_module, "initialize_database", counting_init)
+
+    async def run() -> None:
+        app = CuratorShellApp(project_root=tmp_path)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            init_calls["n"] = 0  # ignore startup; count only interaction-driven refreshes
+            for _ in range(5):
+                app._refresh_status()
+            assert init_calls["n"] <= 1
+
+    asyncio.run(run())
+
+
 def test_shell_app_starts_with_banner_and_setup_status(tmp_path):
     """Verify the app shows the banner and a setup-mode status bar."""
 
