@@ -9,7 +9,7 @@ in-memory execution state from those durable rows and re-enters the scheduler.
 import sqlite3
 from datetime import UTC, datetime
 
-from curator.core.enums import LoopStatus, LoopStepType, PauseStatus
+from curator.core.enums import LoopStatus, LoopStepType, PauseStatus, TaskStatus
 from curator.core.schema import GoalContract, MemoryEntryRecord, PauseRecord
 from curator.providers.base import Provider
 from curator.providers.events import ProviderEventCallback
@@ -27,6 +27,7 @@ from curator.state.repositories import (
     insert_loop_run,
     insert_memory_entry,
     insert_pause_record,
+    insert_task,
     load_evidence_refs_for_run,
     load_goal_revision,
     load_goal_run_for_loop,
@@ -141,6 +142,13 @@ async def resume_workflow(
         )
 
         if pause.resume_mode == "confirm_gate" and _affirmative(message):
+            for task in load_tasks_for_session(connection, session.id):
+                if task.id == pause.task_id:
+                    insert_task(
+                        connection,
+                        task.model_copy(update={"status": TaskStatus.DONE, "updated_at": now}),
+                    )
+                    break
             write_loop_completion(connection, loop_run, LoopStatus.DONE, now)
             return True
 
