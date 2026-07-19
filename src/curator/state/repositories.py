@@ -15,6 +15,7 @@ from curator.state.goals import (
     load_goal_run_for_loop,
     load_latest_goal_run,
     next_goal_revision_number,
+    update_goal_status,
 )
 from curator.state.loops import (
     insert_loop_decision,
@@ -157,4 +158,5 @@ __all__ = [
     "load_work_item",
     "load_work_items",
     "next_goal_revision_number",
+    "update_goal_status",
 ]

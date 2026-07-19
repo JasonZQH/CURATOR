@@ -40,6 +40,17 @@ def insert_goal_identity(
     maybe_commit(connection)
 
 
+def update_goal_status(
+    connection: sqlite3.Connection, goal_id: str, status: str, updated_at: str
+) -> None:
+    """Update one goal identity's durable status and updated_at timestamp."""
+    connection.execute(
+        "update goals set status = ?, updated_at = ? where id = ?",
+        (status, updated_at, goal_id),
+    )
+    maybe_commit(connection)
+
+
 def insert_goal_revision(
     connection: sqlite3.Connection, revision: GoalRevisionRecord
 ) -> None:

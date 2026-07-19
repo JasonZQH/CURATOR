@@ -5,7 +5,7 @@ from pathlib import Path
 
 from curator.app import start_goal_loop, write_init_state
 from curator.context.packaging import build_context_package, build_pm_research_packet
-from curator.core.enums import LoopStepType, ProviderName, RoleName
+from curator.core.enums import GoalStatus, LoopStatus, LoopStepType, ProviderName, RoleName
 from curator.core.paths import build_curator_paths
 from curator.core.schema import HarnessRunSpec, QAValidationOutput
 from curator.goals.store import accept_goal, propose_goal, save_goal
@@ -56,6 +56,30 @@ def _accepted_goal_revision(project_root: Path, text: str = "Fix mobile login la
     goal = propose_goal(text)
     save_goal(paths, goal)
     return accept_goal(paths, goal.id).revision_id
+
+
+def test_start_goal_loop_syncs_goal_identity_status_off_running(tmp_path):
+    """Verify the durable goal identity status is synced to the terminal state, not left 'running'.
+
+    goals.status is written RUNNING up-front, and no user surface reads it today, so this guards
+    the durable ledger: a future goal-history reader would otherwise see every finished goal as
+    still running. The identity must end consistent with the goal_run's terminal status.
+    """
+    revision_id = _accepted_goal_revision(tmp_path)
+    snapshot = start_goal_loop(tmp_path, revision_id, provider=CodingDeliveryFakeProvider())
+    loop_run = snapshot.loop_runs[-1]
+    assert loop_run.status is not LoopStatus.RUNNING  # the loop actually finished
+
+    connection = connect_database(build_curator_paths(tmp_path).database)
+    initialize_database(connection)
+    goal_status = connection.execute("select status from goals").fetchone()["status"]
+    run_status = connection.execute(
+        "select status from goal_runs where loop_run_id = ?", (loop_run.id,)
+    ).fetchone()["status"]
+    connection.close()
+
+    assert goal_status != GoalStatus.RUNNING.value
+    assert goal_status == run_status
 
 
 def test_shell_recovers_goal_draft_and_history_from_sqlite(tmp_path):

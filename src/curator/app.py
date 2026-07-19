@@ -26,6 +26,7 @@ from curator.state.repositories import (
     load_latest_pause_record,
     load_loop_run,
     load_loop_runs_for_session,
+    update_goal_status,
 )
 from curator.runtime.lockfile import project_write_lock
 from curator.state.transaction import transaction
@@ -289,6 +290,14 @@ def _sync_goal_run_status(connection, loop_run_id: str) -> None:
         goal_run.model_copy(
             update={"status": status, "completed_at": loop_run.completed_at}
         ),
+    )
+    # Keep the durable goal identity status in step with its latest run so the ledger
+    # never leaves a finished goal marked 'running' for a future goal-history reader.
+    update_goal_status(
+        connection,
+        goal_run.goal_id,
+        status.value,
+        (loop_run.completed_at or datetime.now(UTC)).isoformat(),
     )
 
 
