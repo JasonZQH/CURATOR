@@ -1,5 +1,6 @@
 """Render workflow state as a terminal-first status panel."""
 
+from curator.core.enums import PauseStatus
 from curator.core.schema import TaskRecord, WorkflowSnapshot
 
 
@@ -68,8 +69,9 @@ def render_workflow_lines(snapshot: WorkflowSnapshot) -> list[str]:
     if stop_line is not None:
         lines.append(stop_line)
 
-    if snapshot.pause_records:
-        pause = snapshot.pause_records[-1]
+    open_pauses = [pause for pause in snapshot.pause_records if pause.status is PauseStatus.OPEN]
+    if open_pauses:
+        pause = open_pauses[-1]
         lines.extend(
             [
                 "Paused:",
