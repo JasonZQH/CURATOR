@@ -1,6 +1,6 @@
 <div align="center">
 
-# Curator ↻
+<img src="docs/assets/carutor-logo.png" alt="Curator" width="560">
 
 **The coding-agent workbench where the scheduler — not the model — stays in control.**
 
