@@ -31,3 +31,52 @@ def redact_secrets(value: str | None) -> str:
 def redact_error(value: str | None, limit: int = _MAX_ERROR_CHARS) -> str:
     """Redact credentials and cap a persisted provider error to its trailing chars."""
     return redact_secrets(value)[-limit:]
+
+
+# Hold back the last few chars of the redacted stream so a credential still forming at a
+# chunk boundary is never emitted before its whole match is visible. It only has to exceed
+# the longest key token ("password") plus its separator, so 64 leaves generous headroom.
+_STREAM_TAIL_HOLD_CHARS = 64
+# Bound the working buffer so an enormous single step cannot make redaction super-linear.
+# Anything past this is already emitted-stable; a secret would have to span the whole
+# window to straddle the reset, which no real credential does.
+_STREAM_MAX_BUFFER_CHARS = 1 << 16
+
+
+class StreamRedactor:
+    """Redact secrets across streamed chunks, tolerating a secret split over a boundary.
+
+    ``redact_secrets`` scrubs each chunk in isolation, so a credential whose characters
+    land in two different OUTPUT_CHUNK events survives. This redactor accumulates the raw
+    stream, redacts the whole buffer on every feed (so a boundary-spanning match is always
+    seen intact), and emits only the portion that can no longer change — holding back a
+    short tail where a match might still be forming. ``flush`` releases the remainder once
+    the stream ends.
+    """
+
+    def __init__(self, hold: int = _STREAM_TAIL_HOLD_CHARS) -> None:
+        """Create a redactor that holds back ``hold`` trailing chars between feeds."""
+        self._buffer = ""
+        self._emitted = 0
+        self._hold = hold
+
+    def scrub(self, text: str) -> str:
+        """Accept the next raw chunk and return the newly-stable redacted delta."""
+        self._buffer += text
+        redacted = redact_secrets(self._buffer)
+        stable = redacted[: -self._hold] if len(redacted) > self._hold else ""
+        delta = stable[self._emitted :]
+        self._emitted = len(stable)
+        if len(self._buffer) > _STREAM_MAX_BUFFER_CHARS:
+            # Drop the already-stable prefix and keep only the unemitted tail so cost and
+            # memory stay bounded; the retained tail preserves boundary detection.
+            self._buffer = self._buffer[-self._hold :]
+            self._emitted = 0
+        return delta
+
+    def flush(self) -> str:
+        """Return any remaining redacted text once the stream ends, then reset."""
+        delta = redact_secrets(self._buffer)[self._emitted :]
+        self._buffer = ""
+        self._emitted = 0
+        return delta

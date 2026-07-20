@@ -58,7 +58,7 @@ from curator.providers.contracts import (
     ProviderRunRequest,
     classify_provider_error,
 )
-from curator.providers.redact import redact_error, redact_secrets
+from curator.providers.redact import StreamRedactor, redact_error, redact_secrets
 from curator.providers.base import Provider
 from curator.providers.driver import ProviderDriver, driver_for_provider
 from curator.providers.events import (
@@ -199,16 +199,29 @@ _LEDGER_EVENT_TYPES = {
 }
 
 
-def _ledger_event_payload(event: ProviderEvent) -> dict:
+def _ledger_event_payload(
+    event: ProviderEvent, redactor: StreamRedactor | None = None
+) -> dict:
     """Return the durable ledger payload for a provider event.
 
-    Provider stdout can echo credentials, so OUTPUT_CHUNK text is scrubbed before it
-    is persisted (errors are already redacted via redact_error); redact then head-cap
-    so the persisted chunk never contains a secret in cleartext.
+    Provider stdout can echo credentials, so OUTPUT_CHUNK text is scrubbed before it is
+    persisted (errors are already redacted via redact_error). A ``redactor`` threads the
+    scrub across the whole streamed transcript so a secret split over two chunk boundaries
+    is caught too, and its held-back tail is flushed onto the terminal event; without one
+    each chunk is redacted (and head-capped) in isolation.
     """
     payload = {"kind": event.kind.value, "label": event.label}
     if event.kind is ProviderEventKind.OUTPUT_CHUNK:
-        payload["text"] = redact_secrets(str(event.payload.get("text", "")))[:OUTPUT_CHUNK_MAX_CHARS]
+        raw = str(event.payload.get("text", ""))
+        text = redactor.scrub(raw) if redactor is not None else redact_secrets(raw)
+        payload["text"] = text[:OUTPUT_CHUNK_MAX_CHARS]
+    elif redactor is not None and event.kind in (
+        ProviderEventKind.COMPLETED,
+        ProviderEventKind.FAILED,
+    ):
+        tail = redactor.flush()
+        if tail:
+            payload["text"] = tail[:OUTPUT_CHUNK_MAX_CHARS]
     return payload
 
 
@@ -219,6 +232,9 @@ def _ledger_event_recorder(
 ) -> ProviderEventCallback:
     """Return a callback that ledgers provider events and forwards them."""
     counter = {"count": 0}
+    # One redactor per provider run so a secret split across streamed chunks is scrubbed
+    # as a continuous transcript rather than one isolated chunk at a time.
+    redactor = StreamRedactor()
 
     def _record(event: ProviderEvent) -> None:
         """Ledger one provider event and forward it to the caller callback."""
@@ -233,7 +249,7 @@ def _ledger_event_recorder(
                     task_id=task_id,
                     type=event_type,
                     created_at=_timestamp(ctx.created_at),
-                    payload=_ledger_event_payload(event),
+                    payload=_ledger_event_payload(event, redactor),
                 ),
             )
         if ctx.on_event is not None:
