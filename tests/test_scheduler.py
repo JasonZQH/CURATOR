@@ -15,10 +15,11 @@ from curator.core.enums import (
 )
 from curator.core.schema import HarnessRunSpec, QAValidationOutput, RoleContract
 from curator.loops.compiler import compile_coding_delivery_plan
+from curator.providers.events import ProviderEvent, ProviderEventKind
 from fakes import CodingDeliveryFakeProvider
 from curator.scheduler.engine import create_workflow_session, run_workflow
 from curator.roles.registry import default_role_contracts
-from curator.state.db import connect_database, initialize_database
+from curator.state.db import CuratorConnection, connect_database, initialize_database
 from curator.state.repositories import (
     load_evidence_refs_for_run,
     load_loop_decisions_for_run,
@@ -504,3 +505,69 @@ def test_create_workflow_session_persists_compiled_plan_for_resume(tmp_path):
         LoopStepType.CONFIRM,
     ]
     assert restored.steps[0].task_id
+
+
+class _StreamingChunkDriver:
+    """Async driver that streams a configurable number of OUTPUT_CHUNK events per step.
+
+    It delegates the real role output to a wrapped synchronous fake so the loop still
+    runs a full successful coding-delivery cycle; only the streamed chunk volume varies.
+    """
+
+    def __init__(self, inner: CodingDeliveryFakeProvider, chunk_count: int) -> None:
+        """Wrap one sync provider and fix how many chunks to stream per step."""
+        self._inner = inner
+        self._chunk_count = chunk_count
+        self.provider_name = inner.provider_name
+        self.provider_profile_id = getattr(inner, "provider_profile_id", None)
+        self.provider_session_id = getattr(inner, "provider_session_id", None)
+        self.quota_status = getattr(inner, "quota_status", None)
+
+    async def run(self, spec, request, on_event=None):
+        """Stream chunk events, then return the wrapped provider's role output."""
+        for index in range(self._chunk_count):
+            if on_event is not None:
+                on_event(
+                    ProviderEvent(
+                        kind=ProviderEventKind.OUTPUT_CHUNK,
+                        provider_run_id=spec.id,
+                        sequence=index + 1,
+                        payload={"text": f"chunk-{index}"},
+                    )
+                )
+        return self._inner.run(spec)
+
+
+def test_provider_streaming_coalesces_ledger_commits(tmp_path, monkeypatch):
+    """Verify streamed provider events commit once per step, not once per chunk.
+
+    Running the same workflow with a small vs a large chunk volume must issue the same
+    number of SQLite commits; if streaming committed per chunk, the counts would diverge.
+    """
+    now = datetime(2026, 6, 25, 14, 30, tzinfo=UTC)
+    counter = {"commits": 0}
+    original_commit = CuratorConnection.commit
+
+    def counting_commit(self):
+        """Count each real SQLite commit issued on a Curator connection."""
+        counter["commits"] += 1
+        return original_commit(self)
+
+    monkeypatch.setattr(CuratorConnection, "commit", counting_commit)
+
+    def _run_and_count(subdir: str, chunk_count: int) -> int:
+        """Run one full workflow streaming chunk_count events per step and count commits."""
+        connection = connect_database(tmp_path / subdir / "curator.sqlite")
+        initialize_database(connection)
+        session_id = create_workflow_session(connection, tmp_path / subdir, created_at=now)
+        counter["commits"] = 0
+        run_workflow(
+            connection,
+            session_id,
+            _StreamingChunkDriver(CodingDeliveryFakeProvider(), chunk_count),
+            created_at=now,
+        )
+        connection.close()
+        return counter["commits"]
+
+    assert _run_and_count("few", 5) == _run_and_count("many", 200)

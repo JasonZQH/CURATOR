@@ -31,6 +31,7 @@ def ensure_default_role_pool(
         # single-writer loop: writer edits, reviewer runs fresh-context.
         ("writer.default", RoleName.ENGINEER, "Writer (default)", ["implementation"]),
         ("reviewer.default", RoleName.QA, "Reviewer (default)", ["review"]),
+        ("maindeck.default", RoleName.PM, "PM (main deck)", ["planning", "discussion"]),
     ]
     for role_id, role_name, label, capabilities in defaults:
         if role_id in existing_ids:

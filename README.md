@@ -95,12 +95,19 @@ Small requests start immediately; `/gate on` reviews the goal proposal first.
 ## How a run works
 
 1. Your text becomes a durable goal draft, then an accepted goal revision.
-2. Curator compiles a single-writer workflow session.
-3. The **writer** provider gets a context package rendered into its CLI prompt.
+2. Curator compiles a single-writer Phase 0 workflow session.
+3. The **writer** provider gets a context package through stdin (prompt text is excluded from argv).
 4. The **verifier** runs discovered or explicit commands and produces hashed evidence.
 5. A fresh-context **reviewer** provider assesses the implementation and verification.
 6. A **human confirmation gate** pauses before delivery is marked done.
 7. Every step lands on the ledger, so `/resume` can continue a paused loop later.
+
+The Excalidraw blueprint is the V1 target rather than the current v0-alpha contract. It
+adds durable Project/Session/Goal/Task entities, dependency-aware scheduling, separate
+Agent/AgentRuntime/ExecutionRuntime identities, capability approvals, artifact and memory
+manifests, worker leases and heartbeats, provider-native TUI handoff, and bounded parallel
+workers. Until those pieces are implemented and tested, this README intentionally describes
+the sequential Phase 0 behavior above.
 
 ## Command reference
 
@@ -108,10 +115,13 @@ Small requests start immediately; `/gate on` reviews the goal proposal first.
 |---|---|
 | Start work | type a request · `/gate on\|off` · `yes` / `no` / `edit <text>` |
 | Watch progress | `/workbench` · `/node current` · `/evidence` |
-| Handle pauses | `/resume <answer>` · `/revise <scope>` · `/cancel` |
+| Handle pauses | `/resume <answer>` · `/resume --run <id> <answer>` · `/revise <scope>` · `/cancel` |
 | Providers | `/provider add` · `/providers` · `/agent bind <slot> <profile>` |
-| Learn & inspect | `/memory` · `/history` · `/status` · `/help` |
+| Learn & inspect | `/memory` · `/history` · `/sessions` · `/status` · `/help` |
 | Terminal | `curator init` · `curator provider add\|list` · `curator reset` · `curator doctor` · `curator status` |
+
+Full-screen TUI also provides Up/Down history, Tab completion, Shift+Enter/Ctrl+J
+continuation lines, animated busy timing, Esc interruption, and two-stage Ctrl+C shutdown.
 
 ## Documentation
 
@@ -121,6 +131,10 @@ Small requests start immediately; `/gate on` reviews the goal proposal first.
 | [provider-profile-layer.html](docs/provider-profile-layer.html) | Provider profiles, slots, and bindings |
 | [runtime-workspace-ui.html](docs/runtime-workspace-ui.html) | The inspectable runtime workspace |
 | [future-optimizations.html](docs/future-optimizations.html) | Roadmap and design trade-offs |
+| [shell-adapter-boundary.html](docs/shell-adapter-boundary.html) | Shell scripts versus Python control-plane responsibilities |
+| [v0-alpha-release-plan-v3.html](docs/v0-alpha-release-plan-v3.html) | Phase 0 release gates and blueprint V1 migration order |
+| [v0-alpha-implementation-status.html](docs/v0-alpha-implementation-status.html) | v3 plan implementation status |
+| [release-notes-v0.1.0.html](docs/release-notes-v0.1.0.html) | v0.1.0 release notes and known limits |
 
 ## Contributing
 

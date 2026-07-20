@@ -8,6 +8,11 @@ from pydantic import Field
 
 from curator.core.models.base import CuratorModel
 
+# Cap persisted/streamed OUTPUT_CHUNK text so one noisy provider line cannot bloat the
+# ledger or the TUI. Shared by the provider adapters that build chunks and the ledger
+# recorder that re-truncates them.
+OUTPUT_CHUNK_MAX_CHARS = 4096
+
 
 class ProviderEventKind(str, Enum):
     """Constrain the event kinds emitted by a running provider."""

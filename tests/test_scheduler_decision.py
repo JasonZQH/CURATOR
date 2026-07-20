@@ -206,8 +206,8 @@ def test_decide_runtime_stops_failed_for_failed_provider_response_status():
 
     decision = decide_runtime(step, result)
 
-    assert decision.decision is LoopDecisionType.STOP_FAILED
-    assert decision.stop_condition is StopCondition.PROVIDER_FAILED
+    assert decision.decision is LoopDecisionType.HUMAN_HANDOFF
+    assert decision.stop_condition is StopCondition.HUMAN_HANDOFF_REQUESTED
     assert "quota exhausted" in decision.reason
 
 
@@ -225,3 +225,20 @@ def test_decide_runtime_pauses_for_recoverable_failed_provider_response():
 
     assert decision.decision is LoopDecisionType.HUMAN_HANDOFF
     assert decision.stop_condition is StopCondition.HUMAN_HANDOFF_REQUESTED
+
+
+def test_ledger_event_payload_redacts_secrets_in_output_chunks():
+    """Verify provider stdout persisted to the ledger cannot carry a bare token in cleartext."""
+    from curator.providers.events import ProviderEvent, ProviderEventKind
+    from curator.scheduler.engine import _ledger_event_payload
+
+    event = ProviderEvent(
+        kind=ProviderEventKind.OUTPUT_CHUNK,
+        provider_run_id="provider-1",
+        payload={"text": "provider said sk-abcdef0123456789abcdef then continued"},
+    )
+
+    payload = _ledger_event_payload(event)
+
+    assert "sk-abcdef0123456789abcdef" not in payload["text"]
+    assert "[REDACTED]" in payload["text"]

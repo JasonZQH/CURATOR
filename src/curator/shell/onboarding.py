@@ -83,13 +83,8 @@ def build_welcome_text(project_root: Path | str) -> str:
     stays down to mode, next action, and open-pause guidance.
     """
     mode = resolve_mode_for_project(project_root)
-    lines = [
-        f"Mode: {mode.label} ({mode.detail})",
-        f"Next: {_next_action(project_root, mode)}",
-    ]
     if open_pause_exists(project_root):
-        lines.append(
-            "A loop is paused — /resume <answer>, /revise <new scope>, or /cancel."
-        )
-    lines.append("Type what you want to work on, or /help.")
-    return "\n".join(lines)
+        return "A loop is paused — /resume <answer>, /revise <new scope>, or /cancel."
+    if mode.label == "live":
+        return "Type what you want to work on, /help for commands, or quit to exit."
+    return f"Next: {_next_action(project_root, mode)}"

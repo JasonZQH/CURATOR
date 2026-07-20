@@ -10,6 +10,7 @@ from curator.runtime.action_policy import ActionPolicy
 
 WRITER_SLOT = "writer"
 REVIEWER_SLOT = "reviewer"
+MAIN_DECK_SLOT = "maindeck"
 
 # Claude Code's --allowedTools/--disallowedTools accept a comma- OR space-separated
 # list. Tool specs like "Bash(git *)" contain a space, so the value MUST be
@@ -22,7 +23,7 @@ _CLAUDE_DISALLOWED = "Bash(git push*),WebFetch"
 
 def _is_reviewer(slot: str | None) -> bool:
     """Return whether a slot must run without workspace writes."""
-    return slot == REVIEWER_SLOT
+    return slot in {REVIEWER_SLOT, MAIN_DECK_SLOT}
 
 
 def claude_permission_args(policy: ActionPolicy, slot: str | None) -> list[str]:

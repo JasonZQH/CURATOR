@@ -186,7 +186,9 @@ class EventType(str, Enum):
     PROVIDER_RUN_STARTED = "provider_run_started"
     PROVIDER_TOOL_CALL = "provider_tool_call"
     PROVIDER_PERMISSION_REQUEST = "provider_permission_request"
+    PROVIDER_OUTPUT_CHUNK = "provider_output_chunk"
     PROVIDER_RUN_COMPLETED = "provider_run_completed"
+    RECOVERY = "recovery"
 
 
 class LoopStatus(str, Enum):
@@ -197,6 +199,7 @@ class LoopStatus(str, Enum):
     PAUSED = "paused"
     DONE = "done"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class GoalStatus(str, Enum):
@@ -205,6 +208,8 @@ class GoalStatus(str, Enum):
     PROPOSED = "proposed"
     ACCEPTED = "accepted"
     RUNNING = "running"
+    PAUSED = "paused"
+    FAILED = "failed"
     DONE = "done"
     CANCELLED = "cancelled"
 

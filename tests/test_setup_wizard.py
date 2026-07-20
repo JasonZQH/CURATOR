@@ -96,6 +96,26 @@ def test_wizard_supports_distinct_providers_per_seat(tmp_path, monkeypatch):
     assert reviewer.provider_profile_id == "codex"
 
 
+def test_compact_setup_binds_engineer_prompt_pick_to_the_writer_seat(tmp_path, monkeypatch):
+    """Verify the provider picked at the 'Engineer' prompt binds the writer seat, not just the reviewer."""
+    _fake_environment(tmp_path, monkeypatch)
+
+    # roles=default(1), PM=claude(1), Engineer prompt=codex(2), confirm=apply(1)
+    outcome = run_setup_wizard(
+        tmp_path, ask=_scripted(["1", "1", "2", "1"]), say=lambda _: None
+    )
+
+    assert outcome.applied
+    connection = connect_database(build_curator_paths(tmp_path).database)
+    initialize_database(connection)
+    writer = load_provider_binding_for_role(connection, "writer.default")
+    reviewer = load_provider_binding_for_role(connection, "reviewer.default")
+    connection.close()
+    # The pick made at the seat labelled "Engineer" must reach the engineer/writer seat.
+    assert writer.provider_profile_id == "codex"
+    assert reviewer.provider_profile_id == "codex"
+
+
 def test_wizard_cancel_at_roles_step_writes_nothing(tmp_path, monkeypatch):
     """Verify cancelling at step one leaves the directory untouched."""
     _fake_environment(tmp_path, monkeypatch)

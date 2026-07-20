@@ -9,7 +9,7 @@ from curator.harness.workspace import WorkspaceBaseline, capture_baseline
 from curator.providers.cli_common import build_cli_provider_response
 from curator.providers.contracts import ProviderRunRequest, ProviderRunResponse
 from curator.providers.driver import SubprocessDriver
-from curator.providers.events import ProviderEvent, ProviderEventKind
+from curator.providers.events import OUTPUT_CHUNK_MAX_CHARS, ProviderEvent, ProviderEventKind
 from curator.runtime.action_policy import ActionPolicy
 from curator.runtime.permissions import claude_permission_args
 
@@ -32,17 +32,21 @@ class ClaudeCodeDriver(SubprocessDriver):
         # writer dispatch); the driver just records the baseline for diffing.
         self._baselines[spec.id] = capture_baseline(self.project_root)
         policy = ActionPolicy.for_project(self.project_root)
-        prompt = render_prompt(request, self.slot)
+        _ = request
         return [
             "claude",
             "-p",
-            prompt,
             "--output-format",
             "stream-json",
             "--verbose",
             "--include-partial-messages",
             *claude_permission_args(policy, self.slot),
         ]
+
+    def build_prompt(self, spec: HarnessRunSpec, request: ProviderRunRequest) -> str:
+        """Render the context package prompt for Claude stdin."""
+        _ = spec
+        return render_prompt(request, self.slot)
 
     def parse_event(
         self, line: str, provider_run_id: str, sequence: int
@@ -70,7 +74,7 @@ class ClaudeCodeDriver(SubprocessDriver):
                 kind=ProviderEventKind.OUTPUT_CHUNK,
                 provider_run_id=provider_run_id,
                 sequence=sequence,
-                payload={"type": message_type},
+                payload={"type": message_type, "text": text[:OUTPUT_CHUNK_MAX_CHARS]},
             )
         if message_type == "result":
             result_text = payload.get("result")

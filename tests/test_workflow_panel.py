@@ -2,7 +2,8 @@
 
 from datetime import UTC, datetime
 
-from curator.core.enums import EvidenceKind
+from curator.core.enums import EvidenceKind, PauseStatus
+from curator.core.schema import PauseRecord
 from curator.core.schema import RoleContract
 from curator.loops.compiler import compile_coding_delivery_plan
 from curator.roles.registry import default_role_contracts
@@ -51,3 +52,37 @@ def test_render_workflow_lines_includes_dynamic_tasks_and_role_selections(tmp_pa
     assert "- Security Reviewer: auth, secret (score 2)" in lines
     assert "  Selected security_reviewer because it matched: auth, secret." in lines
     assert "Evidence: 0" in lines
+
+
+def test_render_workflow_lines_hides_resolved_pauses(tmp_path):
+    """Verify a resumed loop no longer renders its historical pause as active."""
+    now = datetime(2026, 6, 25, 15, 30, tzinfo=UTC)
+    connection = connect_database(tmp_path / ".curator" / "curator.sqlite")
+    initialize_database(connection)
+    session_id = create_workflow_session(connection, tmp_path, created_at=now)
+    snapshot = load_workflow_snapshot(connection, session_id)
+    snapshot = snapshot.model_copy(
+        update={
+            "pause_records": [
+                PauseRecord(
+                    id="pause-resolved",
+                    loop_run_id=snapshot.loop_runs[0].id,
+                    session_id=session_id,
+                    iteration_id="iteration-1",
+                    task_id="task-1",
+                    reason="old pause",
+                    question="old question",
+                    requested_input="/resume yes",
+                    resume_mode="confirm_gate",
+                    status=PauseStatus.RESOLVED,
+                    created_at=now,
+                    resolved_at=now,
+                )
+            ]
+        }
+    )
+
+    lines = render_workflow_lines(snapshot)
+
+    assert "Paused:" not in lines
+    connection.close()

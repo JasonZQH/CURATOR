@@ -1,8 +1,11 @@
 """Drive providers asynchronously with streaming events and cancellation."""
 
 import asyncio
+from contextlib import suppress
 import json
+import os
 from pathlib import Path
+import signal
 from typing import Protocol
 
 from curator.core.enums import ProviderErrorKind, ProviderName
@@ -111,6 +114,11 @@ class SubprocessDriver:
         """Return the subprocess argv for one provider run."""
         raise NotImplementedError
 
+    def build_prompt(self, spec: HarnessRunSpec, request: ProviderRunRequest) -> str:
+        """Return the prompt to send through stdin instead of process argv."""
+        _ = spec, request
+        return ""
+
     def parse_event(
         self, line: str, provider_run_id: str, sequence: int
     ) -> ProviderEvent | None:
@@ -144,11 +152,15 @@ class SubprocessDriver:
         """Terminate a subprocess, escalating to kill after a grace period."""
         if process.returncode is not None:
             return
-        process.terminate()
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
         try:
             await asyncio.wait_for(process.wait(), timeout=_TERMINATE_GRACE_SECONDS)
         except TimeoutError:
-            process.kill()
+            with suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
             await process.wait()
 
     async def run(
@@ -159,15 +171,14 @@ class SubprocessDriver:
     ) -> ProviderRunResponse:
         """Spawn the provider CLI and stream its JSONL events."""
         argv = self.build_argv(spec, request)
+        prompt = self.build_prompt(spec, request)
         process = await asyncio.create_subprocess_exec(
             *argv,
             cwd=self.project_root,
-            # Provide the prompt via argv only. Give the child an empty stdin so
-            # CLIs that opportunistically read stdin (e.g. `codex exec`) get an
-            # immediate EOF instead of blocking forever on input that never comes.
-            stdin=asyncio.subprocess.DEVNULL,
+            stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
         )
         events: list[ProviderEvent] = []
         sequence = 0
@@ -196,10 +207,31 @@ class SubprocessDriver:
             assert process.stderr is not None
             return await process.stderr.read()
 
+        async def _write_stdin() -> None:
+            """Feed the prompt to the child and close stdin, tolerating an early exit."""
+            if process.stdin is None:
+                return
+            try:
+                process.stdin.write(prompt.encode("utf-8"))
+                await process.stdin.drain()
+            except (BrokenPipeError, ConnectionResetError):
+                # The child stopped reading before consuming the prompt; the stdout/stderr
+                # readers and the exit code surface the real reason.
+                pass
+            finally:
+                with suppress(BrokenPipeError, ConnectionResetError):
+                    process.stdin.close()
+
+        stderr_task: asyncio.Task[bytes] | None = None
+        stdout_task: asyncio.Task[None] | None = None
         try:
             async with asyncio.timeout(self.timeout_seconds):
                 stderr_task = asyncio.create_task(_read_stderr())
-                await _read_stdout()
+                stdout_task = asyncio.create_task(_read_stdout())
+                # Feed stdin concurrently with reading stdout so a provider that emits
+                # output before consuming its prompt cannot deadlock the drain.
+                await _write_stdin()
+                await stdout_task
                 stderr_bytes = await stderr_task
                 returncode = await process.wait()
         except TimeoutError as error:
@@ -210,6 +242,16 @@ class SubprocessDriver:
         except asyncio.CancelledError:
             await self._terminate(process)
             raise ProviderCancelledError("Provider run cancelled by user.") from None
+        finally:
+            if process.returncode is None:
+                await self._terminate(process)
+            for task in (stdout_task, stderr_task):
+                if task is not None and not task.done():
+                    task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await task
+            with suppress(ProcessLookupError):
+                await process.wait()
 
         stderr_tail = stderr_bytes.decode("utf-8", errors="replace")[-2000:]
         response = self.build_response(spec, request, events, returncode, stderr_tail)

@@ -1,6 +1,7 @@
 """Verify the async subprocess provider driver."""
 
 import asyncio
+import os
 import sys
 import time
 from pathlib import Path
@@ -26,14 +27,26 @@ class ScriptedDriver(SubprocessDriver):
 
     provider_name = ProviderName.CODEX
 
-    def __init__(self, project_root, scenario: str, timeout_seconds: int = 30) -> None:
+    def __init__(
+        self,
+        project_root,
+        scenario: str,
+        timeout_seconds: int = 30,
+        prompt_size: int = 0,
+    ) -> None:
         """Bind the driver to one scripted scenario."""
         super().__init__(project_root, timeout_seconds=timeout_seconds)
         self.scenario = scenario
+        self.prompt_size = prompt_size
 
     def build_argv(self, spec, request) -> list[str]:
         """Return the fake CLI invocation for this scenario."""
         return [sys.executable, str(_FIXTURE), "--scenario", self.scenario]
+
+    def build_prompt(self, spec, request) -> str:
+        """Return a configurable stdin payload for provider boundary tests."""
+        _ = spec, request
+        return "x" * self.prompt_size
 
     def parse_event(self, line, provider_run_id, sequence):
         """Map scripted JSONL lines to provider events, dropping garbage."""
@@ -137,6 +150,34 @@ def test_subprocess_driver_times_out_and_kills_process(tmp_path):
     assert time.monotonic() - started < 15
 
 
+def test_subprocess_driver_timeout_covers_blocked_stdin_write(tmp_path):
+    """Verify a provider that never reads stdin still respects the timeout budget."""
+    started = time.monotonic()
+
+    with pytest.raises(TimeoutError):
+        _run(ScriptedDriver(tmp_path, "hang", timeout_seconds=1, prompt_size=2_000_000), [])
+
+    assert time.monotonic() - started < 15
+
+
+def test_subprocess_driver_reads_stdout_while_feeding_stdin(tmp_path):
+    """Verify a provider that floods stdout before reading stdin does not deadlock the stdin drain."""
+    events: list[ProviderEvent] = []
+    started = time.monotonic()
+
+    response = _run(
+        ScriptedDriver(tmp_path, "flood_then_read", timeout_seconds=5, prompt_size=200_000),
+        events,
+    )
+
+    assert response.status.value == "succeeded"
+    # A deadlock would only unblock at the timeout; completing well under it proves the
+    # driver reads stdout concurrently with writing stdin.
+    assert time.monotonic() - started < 4
+    labels = [event.label for event in events if event.kind is ProviderEventKind.TOOL_CALL]
+    assert "flood-complete" in labels
+
+
 def test_subprocess_driver_cancellation_terminates_process(tmp_path):
     """Verify cancelling the run raises the typed cancellation error."""
 
@@ -153,6 +194,25 @@ def test_subprocess_driver_cancellation_terminates_process(tmp_path):
     started = time.monotonic()
     asyncio.run(_cancel_mid_run())
     assert time.monotonic() - started < 15
+
+
+def test_subprocess_driver_kills_descendant_process_group(tmp_path):
+    """Verify timeout cleanup removes a provider child process as well."""
+    with pytest.raises(TimeoutError):
+        _run(ScriptedDriver(tmp_path, "spawn_hang", timeout_seconds=1), [])
+
+    child_pid_path = tmp_path / "child.pid"
+    assert child_pid_path.exists()
+    child_pid = int(child_pid_path.read_text(encoding="utf-8"))
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            os.kill(child_pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.05)
+    else:
+        pytest.fail(f"descendant process {child_pid} survived process-group cleanup")
 
 
 def test_legacy_driver_wraps_sync_providers_with_lifecycle_events(tmp_path):

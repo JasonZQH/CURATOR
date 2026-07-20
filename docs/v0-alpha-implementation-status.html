@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Curator v0-alpha 实现落地情况</title>
+  </head>
+  <body>
+    <article>
+      <h1>Curator v0-alpha 实现落地情况</h1>
+      <h2>What</h2>
+      <p>
+        本页回写 v3 发布计划的落地情况。v0.1.0 当前定位仍是本机、单写入者、顺序的
+        Phase 0：Goal → writer → deterministic verifier → fresh-context reviewer → human
+        confirmation；SQLite ledger 是事实来源。DAG、并行 worker、AgentRuntime、Provider
+        TUI、Capability Registry 与 Runtime Handoff 仍是 V1.1–V1.6 迁移目标。
+      </p>
+      <h2>How</h2>
+      <ul>
+        <li>PR1：SQLite connection factory、WAL、nested SAVEPOINT、原子 session/pause/resume、runtime lock、重复崩溃 reconciliation、provider 失败暂停和 resume event 流。</li>
+        <li>PR2：CancellationToken、process group、SIGTERM→SIGKILL 清理、timeout/Ctrl+C/provider error 的 stopped_by/stop_reason、TUI busy/startup gate。</li>
+        <li>PR3：provider prompt 通过 stdin，不进入 argv；OUTPUT_CHUNK 带截断 text 并落入 ledger；Rich 文本统一转义；暂停信息直接输出。</li>
+        <li>PR4：shell history（0600）、Tab 补全、反斜杠续行、<code>/sessions</code>、<code>/resume --run</code>、Phase 0/V1 文档和稳定 slot 名。</li>
+        <li>PR5：Python 3.11/3.12 CI、macOS smoke、v* tag build 及 wheel/sdist 干净安装 smoke；发布说明保留在本目录。</li>
+        <li>Alpha5 gate hardening：CancellationToken 使用线程安全的 event-loop 调度并支持 cancel-before-bind；未知异常保持 STOP_FAILED；startup/REPL 错误写入脱敏的 <code>.curator/errors.log</code>；resume event 已从 shell 接线；TUI 增加历史、Tab 补全、Shift+Enter/Ctrl+J 多行、动画 spinner/耗时、语义色彩、暂停问题直出、启动异常恢复和两段式 Ctrl+C reconcile。</li>
+        <li>Alpha5 验证：SIGKILL 五个提交边界、重复恢复、双线程/双进程锁争用、进程组后代清理、取消竞态和 TUI pilot gate 测试均已加入。</li>
+      </ul>
+      <h2>Why</h2>
+      <p>
+        将状态、事务、锁、进程生命周期和恢复集中在 Python 控制面，能让 shell/TUI 保持入口与
+        观察职责，同时保证机器重启、provider 失败和用户中断都留下可恢复、可审计的 ledger 记录。
+        计划中的 V1 能力未被提前冒充为当前能力，避免用户误判并发隔离和 DAG 调度已经存在。
+      </p>
+      <h2>Future improvements/considerations/trade-offs</h2>
+      <ul>
+        <li>macOS 是主测平台，Linux 由 CI 覆盖；Windows 未支持。</li>
+        <li>flock 只保证本地文件系统；mock provider 的取消仍受同步实现限制；粘贴多行仍会折叠为一次提交，交互式续行使用 Shift+Enter/Ctrl+J。</li>
+        <li>Codex stdin 行为需在实际 CLI 版本上持续 smoke；若版本不接受 stdin，应切换为 0600 临时 prompt 文件并在运行后删除。</li>
+        <li>V1.1–V1.6 需先建立 canonical model、runtime registry、ownership/lease/heartbeat 和恢复契约，再开启 DAG 与并行 worker。</li>
+      </ul>
+      <p>权威范围文档：<a href="v0-alpha-release-plan-v3.html">v0-alpha-release-plan-v3.html</a>。</p>
+    </article>
+  </body>
+</html>

@@ -101,7 +101,7 @@ def test_bare_curator_opens_natural_language_shell(tmp_path, monkeypatch):
 
     assert result.exit_code == 0
     assert "curator v0.1.0" in result.stdout
-    assert "Type what you want to work on" in result.stdout
+    assert "Next:" in result.stdout
 
 
 def test_bare_curator_shows_banner_identity(tmp_path, monkeypatch):
@@ -507,14 +507,13 @@ def test_pyproject_declares_build_system():
 
 
 def test_shell_welcome_banner_shows_mode_and_next_action(tmp_path, monkeypatch):
-    """Verify the shell banner states the execution mode and one next action."""
+    """Verify the shell states the mode via its prompt and one next action."""
     runner = CliRunner()
     monkeypatch.chdir(tmp_path)
 
     result = runner.invoke(app, [], input="/quit\n")
 
     assert result.exit_code == 0
-    assert "Mode: setup" in result.stdout
     assert "Next:" in result.stdout
     assert "(setup) >" in result.stdout
 
