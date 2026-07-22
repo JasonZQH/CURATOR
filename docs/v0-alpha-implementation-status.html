@@ -1,44 +1,109 @@
 <!doctype html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Curator v0-alpha 实现落地情况</title>
-  </head>
-  <body>
-    <article>
-      <h1>Curator v0-alpha 实现落地情况</h1>
-      <h2>What</h2>
-      <p>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Curator · v0-alpha 实现落地情况</title>
+  <link rel="stylesheet" href="assets/curator-docs.css" />
+</head>
+<body id="top">
+
+  <header class="masthead">
+    <a class="wordmark" href="#top"><span class="loop">↻</span><span class="name">Curator</span></a>
+    <span class="mast-spacer"></span>
+    <div class="phase-legend">
+      <span class="chip live">Live · Phase 0</span>
+      <span class="chip target">Target · V1</span>
+    </div>
+  </header>
+
+  <main class="page">
+    <div class="doc-head">
+      <span class="eyebrow">Release · Status</span>
+      <h1>v0-alpha 实现落地情况</h1>
+      <p class="dek">
         本页回写 v3 发布计划的落地情况。v0.1.0 当前定位仍是本机、单写入者、顺序的
-        Phase 0：Goal → writer → deterministic verifier → fresh-context reviewer → human
-        confirmation；SQLite ledger 是事实来源。DAG、并行 worker、AgentRuntime、Provider
-        TUI、Capability Registry 与 Runtime Handoff 仍是 V1.1–V1.6 迁移目标。
+        Phase 0；<strong>SQLite ledger 是事实来源</strong>。DAG、并行 worker、AgentRuntime、
+        Provider TUI、Capability Registry 与 Runtime Handoff 仍是 V1.1–V1.6 迁移目标。
       </p>
-      <h2>How</h2>
-      <ul>
-        <li>PR1：SQLite connection factory、WAL、nested SAVEPOINT、原子 session/pause/resume、runtime lock、重复崩溃 reconciliation、provider 失败暂停和 resume event 流。</li>
-        <li>PR2：CancellationToken、process group、SIGTERM→SIGKILL 清理、timeout/Ctrl+C/provider error 的 stopped_by/stop_reason、TUI busy/startup gate。</li>
-        <li>PR3：provider prompt 通过 stdin，不进入 argv；OUTPUT_CHUNK 带截断 text 并落入 ledger；Rich 文本统一转义；暂停信息直接输出。</li>
-        <li>PR4：shell history（0600）、Tab 补全、反斜杠续行、<code>/sessions</code>、<code>/resume --run</code>、Phase 0/V1 文档和稳定 slot 名。</li>
-        <li>PR5：Python 3.11/3.12 CI、macOS smoke、v* tag build 及 wheel/sdist 干净安装 smoke；发布说明保留在本目录。</li>
-        <li>Alpha5 gate hardening：CancellationToken 使用线程安全的 event-loop 调度并支持 cancel-before-bind；未知异常保持 STOP_FAILED；startup/REPL 错误写入脱敏的 <code>.curator/errors.log</code>；resume event 已从 shell 接线；TUI 增加历史、Tab 补全、Shift+Enter/Ctrl+J 多行、动画 spinner/耗时、语义色彩、暂停问题直出、启动异常恢复和两段式 Ctrl+C reconcile。</li>
-        <li>Alpha5 验证：SIGKILL 五个提交边界、重复恢复、双线程/双进程锁争用、进程组后代清理、取消竞态和 TUI pilot gate 测试均已加入。</li>
-      </ul>
-      <h2>Why</h2>
+    </div>
+
+    <figure class="figure">
+      <div class="mermaid">
+flowchart LR
+  P1["PR1<br/><small>事务 · 锁 · 恢复</small>"]:::pass --> P2["PR2<br/><small>进程组 · 取消</small>"]:::pass --> P3["PR3<br/><small>stdin · OUTPUT_CHUNK</small>"]:::pass --> P4["PR4<br/><small>shell UX · 文档</small>"]:::pass --> P5["PR5<br/><small>CI · 安装 smoke</small>"]:::pass --> A5["Alpha5<br/><small>gate hardening</small>"]:::pass
+  classDef pass fill:#0c2b1d,stroke:#43e2a4,stroke-width:1.6px,color:#c9ffe6;
+      </div>
+      <div class="figure-cap"><b>图 1.</b><span>PR1–PR5 与 Alpha5 gate hardening 均已落地并配套测试。</span></div>
+      <div class="figure-legend">
+        <span class="leg"><span class="swatch" style="background:#43e2a4"></span>已合并 · 已测试</span>
+      </div>
+    </figure>
+
+    <section class="sec" id="what">
+      <div class="sec-eyebrow"><span class="mark">W</span> What</div>
+      <h2>当前定位</h2>
       <p>
-        将状态、事务、锁、进程生命周期和恢复集中在 Python 控制面，能让 shell/TUI 保持入口与
-        观察职责，同时保证机器重启、provider 失败和用户中断都留下可恢复、可审计的 ledger 记录。
-        计划中的 V1 能力未被提前冒充为当前能力，避免用户误判并发隔离和 DAG 调度已经存在。
+        v0.1.0 仍是本机、单写入者、顺序的 Phase 0：Goal → writer → deterministic verifier →
+        fresh-context reviewer → human confirmation；SQLite ledger 是事实来源。DAG、并行
+        worker、AgentRuntime、Provider TUI、Capability Registry 与 Runtime Handoff 仍是
+        V1.1–V1.6 迁移目标。
       </p>
-      <h2>Future improvements/considerations/trade-offs</h2>
+    </section>
+
+    <section class="sec" id="how">
+      <div class="sec-eyebrow"><span class="mark">H</span> How</div>
+      <h2>已落地的 PR</h2>
+      <ul>
+        <li><strong>PR1：</strong>SQLite connection factory、WAL、nested SAVEPOINT、原子 session/pause/resume、runtime lock、重复崩溃 reconciliation、provider 失败暂停和 resume event 流。</li>
+        <li><strong>PR2：</strong>CancellationToken、process group、SIGTERM→SIGKILL 清理、timeout/Ctrl+C/provider error 的 stopped_by/stop_reason、TUI busy/startup gate。</li>
+        <li><strong>PR3：</strong>provider prompt 通过 stdin，不进入 argv；<code>OUTPUT_CHUNK</code> 带截断 text 并落入 ledger；Rich 文本统一转义；暂停信息直接输出。</li>
+        <li><strong>PR4：</strong>shell history（0600）、Tab 补全、反斜杠续行、<code>/sessions</code>、<code>/resume --run</code>、Phase 0/V1 文档和稳定 slot 名。</li>
+        <li><strong>PR5：</strong>Python 3.11/3.12 CI、macOS smoke、<code>v*</code> tag build 及 wheel/sdist 干净安装 smoke；发布说明保留在本目录。</li>
+        <li><strong>Alpha5 gate hardening：</strong>CancellationToken 使用线程安全的 event-loop 调度并支持 cancel-before-bind；未知异常保持 STOP_FAILED；startup/REPL 错误写入脱敏的 <code>.curator/errors.log</code>；resume event 已从 shell 接线；TUI 增加历史、Tab 补全、Shift+Enter/Ctrl+J 多行、动画 spinner/耗时、语义色彩、暂停问题直出、启动异常恢复和两段式 Ctrl+C reconcile。</li>
+        <li><strong>Alpha5 验证：</strong>SIGKILL 五个提交边界、重复恢复、双线程/双进程锁争用、进程组后代清理、取消竞态和 TUI pilot gate 测试均已加入。</li>
+      </ul>
+    </section>
+
+    <section class="sec" id="why">
+      <div class="sec-eyebrow"><span class="mark">Y</span> Why</div>
+      <h2>为什么集中在 Python 控制面</h2>
+      <p>
+        将状态、事务、锁、进程生命周期和恢复集中在 Python 控制面，能让 shell/TUI 保持入口与观察职责，同时
+        保证机器重启、provider 失败和用户中断都留下可恢复、可审计的 ledger 记录。计划中的 V1 能力未被提前
+        冒充为当前能力，避免用户误判并发隔离和 DAG 调度已经存在。
+      </p>
+    </section>
+
+    <section class="sec" id="future">
+      <div class="sec-eyebrow"><span class="mark">F</span> Future · considerations · trade-offs</div>
+      <h2>已知边界</h2>
       <ul>
         <li>macOS 是主测平台，Linux 由 CI 覆盖；Windows 未支持。</li>
         <li>flock 只保证本地文件系统；mock provider 的取消仍受同步实现限制；粘贴多行仍会折叠为一次提交，交互式续行使用 Shift+Enter/Ctrl+J。</li>
         <li>Codex stdin 行为需在实际 CLI 版本上持续 smoke；若版本不接受 stdin，应切换为 0600 临时 prompt 文件并在运行后删除。</li>
         <li>V1.1–V1.6 需先建立 canonical model、runtime registry、ownership/lease/heartbeat 和恢复契约，再开启 DAG 与并行 worker。</li>
       </ul>
-      <p>权威范围文档：<a href="v0-alpha-release-plan-v3.html">v0-alpha-release-plan-v3.html</a>。</p>
-    </article>
-  </body>
+      <p class="lede-note">权威范围文档：<a href="v0-alpha-release-plan-v3.html">v0-alpha-release-plan-v3.html</a>。</p>
+    </section>
+  </main>
+
+  <footer class="doc-foot">
+    <div class="foot-eyebrow">Curator documentation</div>
+    <nav class="doc-index">
+      <a href="orchestration.html"><span class="di-title">Orchestration &amp; runtime boundary</span><span class="di-desc">The Phase 0 control loop and the V1 blueprint boundary.</span></a>
+      <a href="provider-profile-layer.html"><span class="di-title">Provider &amp; runtime identity</span><span class="di-desc">Agent, Provider, AgentRuntime, and Execution.</span></a>
+      <a href="runtime-workspace-ui.html"><span class="di-title">Runtime workspace UI</span><span class="di-desc">The workbench today, the Control Desk target.</span></a>
+      <a href="shell-adapter-boundary.html"><span class="di-title">Shell adapter boundary</span><span class="di-desc">What shell may do vs the Python control plane.</span></a>
+      <a href="future-optimizations.html"><span class="di-title">Future optimizations</span><span class="di-desc">The evidence-driven runtime kernel backlog.</span></a>
+      <a href="v0-alpha-release-plan-v3.html"><span class="di-title">v0.1.0 release plan (v3)</span><span class="di-desc">Release gates and the V1.1–V1.6 ladder.</span></a>
+      <a class="current" href="v0-alpha-implementation-status.html"><span class="di-title">Implementation status</span><span class="di-desc">What PR1–PR5 actually landed.</span></a>
+      <a href="release-notes-v0.1.0.html"><span class="di-title">v0.1.0 release notes</span><span class="di-desc">What ships, and the known limits.</span></a>
+      <a href="orca-parallel-orchestration-and-task-memory.html"><span class="di-title">Parallel orchestration &amp; task memory</span><span class="di-desc">Orca's parallelism as evidence-backed state.</span></a>
+    </nav>
+    <div class="foot-meta"><span class="chip live">Phase 0</span> local · single-writer · sequential — the V1 blueprint is a migration target, not current capability.</div>
+  </footer>
+
+  <script type="module" src="assets/curator-mermaid.js"></script>
+</body>
 </html>

@@ -1,183 +1,151 @@
 <!doctype html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Curator v0-alpha v0.1.0 发布计划 v3</title>
-    <style>
-      body {
-        color: #1f2937;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        line-height: 1.6;
-        margin: 0 auto;
-        max-width: 1050px;
-        padding: 32px 20px 56px;
-      }
-      code, pre { background: #f3f4f6; border-radius: 4px; padding: 2px 4px; }
-      pre { overflow-x: auto; padding: 16px; }
-      table { border-collapse: collapse; width: 100%; }
-      th, td { border: 1px solid #d1d5db; padding: 8px; text-align: left; vertical-align: top; }
-      th { background: #f3f4f6; }
-      .blocker { color: #991b1b; font-weight: 700; }
-      .target { color: #1d4ed8; font-weight: 700; }
-    </style>
-  </head>
-  <body>
-    <article>
-      <h1>Curator v0-alpha (v0.1.0) 发布计划 v3</h1>
-      <p>
-        本版依据代码库现状和用户提供的 Excalidraw 蓝图重排范围。结论是：可以开始实现，
-        但 v0.1.0 必须继续作为“单机、单写入者、顺序工作流”的 Phase 0 发布；画布中的
-        DAG、并行 worker、AgentRuntime、Provider TUI、Capability Registry 和 Runtime
-        Handoff 应定义为 V1 迁移目标，不能提前写成已实现能力。
-      </p>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Curator · v0.1.0 发布计划 v3</title>
+  <link rel="stylesheet" href="assets/curator-docs.css" />
+</head>
+<body id="top">
 
-      <h2>What</h2>
+  <header class="masthead">
+    <a class="wordmark" href="#top"><span class="loop">↻</span><span class="name">Curator</span></a>
+    <span class="mast-spacer"></span>
+    <div class="phase-legend">
+      <span class="chip live">Live · Phase 0</span>
+      <span class="chip target">Target · V1</span>
+    </div>
+  </header>
+
+  <main class="page">
+    <div class="doc-head">
+      <span class="eyebrow">Release · Plan v3</span>
+      <h1>v0.1.0 发布计划 v3</h1>
+      <p class="dek">
+        结论：可以开始实现，但 v0.1.0 必须继续作为<strong>单机、单写入者、顺序工作流</strong>的
+        Phase 0 发布。画布中的 DAG、并行 worker、AgentRuntime、Provider TUI、Capability
+        Registry 和 Runtime Handoff 是 V1 迁移目标，不能提前写成已实现能力。
+      </p>
+    </div>
+
+    <figure class="figure">
+      <div class="mermaid">
+flowchart TB
+  V0["v0.1.0 · Phase 0<br/><small>单机 · 单写入者 · 顺序</small>"]:::live --> A["V1.1 Canonical Model"]:::target --> B["V1.2 Runtime Registry"]:::target --> C["V1.3 Scheduler"]:::target --> D["V1.4 Runtime UX"]:::target --> E["V1.5 Recovery"]:::target --> F["V1.6 Parallel Workers"]:::target
+  classDef live fill:#0e1a33,stroke:#3b8cff,stroke-width:1.5px,color:#eaf1ff;
+  classDef target fill:#140b22,stroke:#c77dff,stroke-width:1.5px,stroke-dasharray:5 4,color:#ecd9ff;
+      </div>
+      <div class="figure-cap"><b>图 1.</b><span>分层发布：v0.1.0 是可交付的实线基座，V1.1–V1.6 是虚线迁移阶梯。</span></div>
+      <div class="figure-legend">
+        <span class="leg"><span class="swatch" style="background:rgba(59,140,255,0.5);border:1px solid #3b8cff"></span>已交付 · Phase 0</span>
+        <span class="leg"><span class="swatch" style="border:1.5px dashed #c77dff;background:transparent"></span>V1 迁移目标</span>
+      </div>
+    </figure>
+
+    <section class="sec" id="what">
+      <div class="sec-eyebrow"><span class="mark">W</span> What</div>
+      <h2>两个交付对象</h2>
       <p>
         v0.1.0 的交付对象是一个可恢复、可审计的本地控制面：Goal → writer provider →
-        deterministic verifier → fresh-context reviewer → human confirmation。状态以
-        SQLite ledger 为准，provider 只执行受边界约束的工作，shell/TUI 只提供入口和观察面。
+        deterministic verifier → fresh-context reviewer → human confirmation。状态以 SQLite
+        ledger 为准，provider 只执行受边界约束的工作，shell/TUI 只提供入口和观察面。
       </p>
-      <p class="target">
+      <p class="target-tag">
         V1 的交付对象才是画布中的多角色运行时：Project/Session/Goal/Task DAG、Agent 与
         AgentRuntime 分离、Execution 与 ExecutionRuntime 分离、Provider/Capability 管理、
-        Artifact/Memory 文件清单、lease/heartbeat、Control Desk 与原生 Provider TUI 协作，
-        以及最多四个本地并行 worker。
+        Artifact/Memory 文件清单、lease/heartbeat、Control Desk 与原生 Provider TUI 协作，以及
+        最多四个本地并行 worker。
       </p>
+    </section>
 
-      <h2>How</h2>
-      <h3>一、v0.1.0 必须完成的发布门槛</h3>
-      <table>
-        <thead><tr><th>优先级</th><th>工作项</th><th>验收条件</th></tr></thead>
-        <tbody>
-          <tr>
-            <td class="blocker">P0</td>
-            <td>修正事务状态实现</td>
-            <td>
-              不在标准 <code>sqlite3.Connection</code> 实例上挂载自定义属性。改用
-              connection subclass/factory、外部 transaction state 或显式事务 API；测试
-              nested transaction、rollback、异常恢复和并发写入。
-            </td>
-          </tr>
-          <tr>
-            <td class="blocker">P0</td>
-            <td>修正重复崩溃后的 pause/recovery</td>
-            <td>
-              同一个 loop 在恢复后再次崩溃，必须生成新的 recovery attempt/open pause，不能
-              因复用已 RESOLVED 的固定 pause id 而把 loop 留在 PAUSED 且没有可恢复入口。
-            </td>
-          </tr>
-          <tr>
-            <td class="blocker">P0</td>
-            <td>统一所有写入口的单写入者锁</td>
-            <td>
-              shell、TUI、CLI 直接调用 <code>start_goal_loop</code> 或
-              <code>resume_goal_loop</code> 都经过同一把 project/runtime lock；锁不可用时
-              只允许只读查看，禁止 approve/resume/retry/cancel 等 mutation。
-            </td>
-          </tr>
-          <tr>
-            <td class="blocker">P0</td>
-            <td>完成进程组和中断语义</td>
-            <td>
-              provider 启动使用 process group；Ctrl+C、timeout、provider error、machine
-              restart 都能记录 stopped_by/stop_reason，清理子进程，不留下 RUNNING execution。
-            </td>
-          </tr>
-          <tr>
-            <td>P1</td>
-            <td>收紧 provider 输入输出边界</td>
-            <td>
-              prompt/context 优先通过文件或 stdin 传递，避免把敏感内容放进 argv；事件、日志、
-              response、evidence、artifact ref 的字段与 ledger 类型一致。若
-              <code>OUTPUT_CHUNK</code> 不落 ledger，就不能宣称“所有 provider event 已持久化”。
-            </td>
-          </tr>
-          <tr>
-            <td>P1</td>
-            <td>发布与安装验收</td>
-            <td>
-              CI 同时 smoke-test wheel 和 sdist；tag 触发条件、macOS 测试、Python 版本、干净
-              安装、provider 缺失时的阻塞提示都能复现。文档中的安装 tag 必须与实际发布 tag 一致。
-            </td>
-          </tr>
-          <tr>
-            <td>P1</td>
-            <td>文档事实对齐</td>
-            <td>
-              README 与四份运行时文档明确标注 Phase 0/V1；命令示例使用稳定 slot 名称；不把
-              DAG、并行、tmux、heartbeat、native TUI 或 handoff 写成当前能力。
-            </td>
-          </tr>
-        </tbody>
-      </table>
+    <section class="sec" id="how">
+      <div class="sec-eyebrow"><span class="mark">H</span> How</div>
+      <h2>一、v0.1.0 必须完成的发布门槛</h2>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>优先级</th><th>工作项</th><th>验收条件</th></tr></thead>
+          <tbody>
+            <tr><td><span class="blocker">P0</span></td><td>修正事务状态实现</td><td>不在标准 <code>sqlite3.Connection</code> 实例上挂载自定义属性。改用 connection subclass/factory、外部 transaction state 或显式事务 API；测试 nested transaction、rollback、异常恢复和并发写入。</td></tr>
+            <tr><td><span class="blocker">P0</span></td><td>修正重复崩溃后的 pause/recovery</td><td>同一个 loop 在恢复后再次崩溃，必须生成新的 recovery attempt/open pause，不能因复用已 RESOLVED 的固定 pause id 而把 loop 留在 PAUSED 且没有可恢复入口。</td></tr>
+            <tr><td><span class="blocker">P0</span></td><td>统一所有写入口的单写入者锁</td><td>shell、TUI、CLI 直接调用 <code>start_goal_loop</code> 或 <code>resume_goal_loop</code> 都经过同一把 project/runtime lock；锁不可用时只允许只读查看，禁止 approve/resume/retry/cancel 等 mutation。</td></tr>
+            <tr><td><span class="blocker">P0</span></td><td>完成进程组和中断语义</td><td>provider 启动使用 process group；Ctrl+C、timeout、provider error、machine restart 都能记录 stopped_by/stop_reason，清理子进程，不留下 RUNNING execution。</td></tr>
+            <tr><td>P1</td><td>收紧 provider 输入输出边界</td><td>prompt/context 优先通过文件或 stdin 传递，避免把敏感内容放进 argv；事件、日志、response、evidence、artifact ref 的字段与 ledger 类型一致。若 <code>OUTPUT_CHUNK</code> 不落 ledger，就不能宣称"所有 provider event 已持久化"。</td></tr>
+            <tr><td>P1</td><td>发布与安装验收</td><td>CI 同时 smoke-test wheel 和 sdist；tag 触发条件、macOS 测试、Python 版本、干净安装、provider 缺失时的阻塞提示都能复现。文档中的安装 tag 必须与实际发布 tag 一致。</td></tr>
+            <tr><td>P1</td><td>文档事实对齐</td><td>README 与运行时文档明确标注 Phase 0/V1；命令示例使用稳定 slot 名称；不把 DAG、并行、tmux、heartbeat、native TUI 或 handoff 写成当前能力。</td></tr>
+          </tbody>
+        </table>
+      </div>
 
-      <h3>二、`.sh` 可以承担的工作</h3>
+      <h2>二、<code>.sh</code> 可以承担的工作</h2>
       <p>
-        `.sh` 适合作为 OS/process adapter：检测命令和版本、创建或 attach tmux、启动 provider、
-        收集 stdout/stderr、转发 signal、生成日志或 artifact manifest。Python 仍然负责事务、
-        状态机、锁、审批、retry、recovery、事件索引和最终决策。shell adapter 不得直接改 ledger、
-        绕过权限、决定 task ownership，也不得把 agent A 的输出直接 pipe 给 agent B 而跳过事件链。
+        <code>.sh</code> 适合作为 OS/process adapter：检测命令和版本、创建或 attach tmux、启动
+        provider、收集 stdout/stderr、转发 signal、生成日志或 artifact manifest。Python 仍然负责
+        事务、状态机、锁、审批、retry、recovery、事件索引和最终决策。shell adapter 不得直接改
+        ledger、绕过权限、决定 task ownership，也不得把 agent A 的输出直接 pipe 给 agent B 而跳过
+        事件链。
       </p>
       <p>
         最小契约应固定 context-file/workspace 输入、NDJSON 或 manifest 输出、stdout/stderr 分离、
-        process-group 信号转发和 exit code。这样 v0.1.0 可以继续使用 direct subprocess，V1 再
-        将同一 adapter 接入 tmux/Ghostty/Warp，而不把运行时状态散落进 shell 逻辑。
+        process-group 信号转发和 exit code。这样 v0.1.0 可以继续使用 direct subprocess，V1 再将同一
+        adapter 接入 tmux/Ghostty/Warp，而不把运行时状态散落进 shell 逻辑。
       </p>
 
-      <h3>三、按画布拆分的 V1 迁移顺序</h3>
-      <table>
-        <thead><tr><th>阶段</th><th>新增能力</th><th>不能跳过的前置条件</th></tr></thead>
-        <tbody>
-          <tr>
-            <td>V1.1 Canonical Model</td>
-            <td>Project, Session, Goal, Task, Dependency, Agent, Provider, Execution, Artifact, Memory</td>
-            <td>迁移映射、状态转换表、幂等 command、append-only event schema</td>
-          </tr>
-          <tr>
-            <td>V1.2 Runtime Registry</td>
-            <td>AgentRuntime, ExecutionRuntime, Provider status, capability/version/install records</td>
-            <td>lease、heartbeat、process identity、provider capability probe</td>
-          </tr>
-          <tr>
-            <td>V1.3 Scheduler</td>
-            <td>Goal → Task DAG、ready queue、dependency release、retry policy、approval policy</td>
-            <td>workspace ownership/conflict、permission scope、concurrency limit、fairness</td>
-          </tr>
-          <tr>
-            <td>V1.4 Runtime UX</td>
-            <td>Control Desk、tmux backend、provider TUI focus/sync、WAITING_USER/APPROVAL</td>
-            <td>native TUI 不作为 system of record；所有动作回写统一事件链</td>
-          </tr>
-          <tr>
-            <td>V1.5 Recovery</td>
-            <td>handoff snapshot、machine restart recovery、context-independent retry、artifact replay</td>
-            <td>Execution 不被 handoff 覆盖；retry 新建 execution；旧记录只读保留</td>
-          </tr>
-          <tr>
-            <td>V1.6 Parallel Workers</td>
-            <td>默认最多 4 worker，支持独立 ready task 并行执行</td>
-            <td>先通过冲突、资源耗尽、worker crash、无限循环和 invalid output 测试</td>
-          </tr>
-        </tbody>
-      </table>
+      <h2>三、按画布拆分的 V1 迁移顺序</h2>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>阶段</th><th>新增能力</th><th>不能跳过的前置条件</th></tr></thead>
+          <tbody>
+            <tr><td><span class="target-tag">V1.1</span> Canonical Model</td><td>Project, Session, Goal, Task, Dependency, Agent, Provider, Execution, Artifact, Memory</td><td>迁移映射、状态转换表、幂等 command、append-only event schema</td></tr>
+            <tr><td><span class="target-tag">V1.2</span> Runtime Registry</td><td>AgentRuntime, ExecutionRuntime, Provider status, capability/version/install records</td><td>lease、heartbeat、process identity、provider capability probe</td></tr>
+            <tr><td><span class="target-tag">V1.3</span> Scheduler</td><td>Goal → Task DAG、ready queue、dependency release、retry policy、approval policy</td><td>workspace ownership/conflict、permission scope、concurrency limit、fairness</td></tr>
+            <tr><td><span class="target-tag">V1.4</span> Runtime UX</td><td>Control Desk、tmux backend、provider TUI focus/sync、WAITING_USER/APPROVAL</td><td>native TUI 不作为 system of record；所有动作回写统一事件链</td></tr>
+            <tr><td><span class="target-tag">V1.5</span> Recovery</td><td>handoff snapshot、machine restart recovery、context-independent retry、artifact replay</td><td>Execution 不被 handoff 覆盖；retry 新建 execution；旧记录只读保留</td></tr>
+            <tr><td><span class="target-tag">V1.6</span> Parallel Workers</td><td>默认最多 4 worker，支持独立 ready task 并行执行</td><td>先通过冲突、资源耗尽、worker crash、无限循环和 invalid output 测试</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
 
-      <h2>Why</h2>
+    <section class="sec" id="why">
+      <div class="sec-eyebrow"><span class="mark">Y</span> Why</div>
+      <h2>分层发布的理由</h2>
       <p>
-        画布的核心不是“把更多 agent 接进来”，而是让业务执行身份、provider 运行身份、审批、
-        证据和恢复都可持久化。若把 v0-alpha 直接改写成 V1，用户会误以为已经具备依赖调度和
-        并发隔离；若只修几个 stale 字符串，又会遗漏 Execution/Runtime/Handoff 的语义变化。
-        分层发布能同时保持 v0.1.0 可交付和 V1 架构可演进。
+        画布的核心不是"把更多 agent 接进来"，而是让业务执行身份、provider 运行身份、审批、证据和恢复都
+        可持久化。若把 v0-alpha 直接改写成 V1，用户会误以为已经具备依赖调度和并发隔离；若只修几个 stale
+        字符串，又会遗漏 Execution/Runtime/Handoff 的语义变化。分层发布能同时保持 v0.1.0 可交付和 V1
+        架构可演进。
       </p>
+    </section>
 
-      <h2>Future improvements/considerations/trade-offs</h2>
+    <section class="sec" id="future">
+      <div class="sec-eyebrow"><span class="mark">F</span> Future · considerations · trade-offs</div>
+      <h2>迁移取舍</h2>
       <ul>
         <li>优先建立 v0 ledger 到 V1 canonical model 的只读映射，再做破坏性迁移。</li>
-        <li>在并行前先实现 workspace lock/ownership；否则“并行”只是并发制造脏 diff。</li>
+        <li>在并行前先实现 workspace lock/ownership；否则"并行"只是并发制造脏 diff。</li>
         <li>Capability policy 要区分 filesystem、shell、network、credential 和 external access，不能只用一个 allow/deny。</li>
         <li>大日志、patch、prompt snapshot 和测试结果放 filesystem，SQLite 只保存索引、hash、状态和引用。</li>
         <li>每个新函数继续遵守项目约定：用一行命令式注释说明函数职责；新增文档保持 What/How/Why/Future 四段结构。</li>
       </ul>
-    </article>
-  </body>
+    </section>
+  </main>
+
+  <footer class="doc-foot">
+    <div class="foot-eyebrow">Curator documentation</div>
+    <nav class="doc-index">
+      <a href="orchestration.html"><span class="di-title">Orchestration &amp; runtime boundary</span><span class="di-desc">The Phase 0 control loop and the V1 blueprint boundary.</span></a>
+      <a href="provider-profile-layer.html"><span class="di-title">Provider &amp; runtime identity</span><span class="di-desc">Agent, Provider, AgentRuntime, and Execution.</span></a>
+      <a href="runtime-workspace-ui.html"><span class="di-title">Runtime workspace UI</span><span class="di-desc">The workbench today, the Control Desk target.</span></a>
+      <a href="shell-adapter-boundary.html"><span class="di-title">Shell adapter boundary</span><span class="di-desc">What shell may do vs the Python control plane.</span></a>
+      <a href="future-optimizations.html"><span class="di-title">Future optimizations</span><span class="di-desc">The evidence-driven runtime kernel backlog.</span></a>
+      <a class="current" href="v0-alpha-release-plan-v3.html"><span class="di-title">v0.1.0 release plan (v3)</span><span class="di-desc">Release gates and the V1.1–V1.6 ladder.</span></a>
+      <a href="v0-alpha-implementation-status.html"><span class="di-title">Implementation status</span><span class="di-desc">What PR1–PR5 actually landed.</span></a>
+      <a href="release-notes-v0.1.0.html"><span class="di-title">v0.1.0 release notes</span><span class="di-desc">What ships, and the known limits.</span></a>
+      <a href="orca-parallel-orchestration-and-task-memory.html"><span class="di-title">Parallel orchestration &amp; task memory</span><span class="di-desc">Orca's parallelism as evidence-backed state.</span></a>
+    </nav>
+    <div class="foot-meta"><span class="chip live">Phase 0</span> local · single-writer · sequential — the V1 blueprint is a migration target, not current capability.</div>
+  </footer>
+
+  <script type="module" src="assets/curator-mermaid.js"></script>
+</body>
 </html>

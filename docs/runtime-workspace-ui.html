@@ -1,93 +1,136 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Runtime Workspace UI</title>
-    <style>
-      body {
-        color: #1f2937;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        line-height: 1.55;
-        margin: 0 auto;
-        max-width: 920px;
-        padding: 32px 20px 48px;
-      }
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Curator · Runtime Workspace UI</title>
+  <link rel="stylesheet" href="assets/curator-docs.css" />
+</head>
+<body id="top">
 
-      code {
-        background: #f3f4f6;
-        border-radius: 4px;
-        padding: 2px 4px;
-      }
+  <header class="masthead">
+    <a class="wordmark" href="#top"><span class="loop">↻</span><span class="name">Curator</span></a>
+    <span class="mast-spacer"></span>
+    <div class="phase-legend">
+      <span class="chip live">Live · Phase 0</span>
+      <span class="chip target">Target · V1</span>
+    </div>
+  </header>
 
-      pre {
-        background: #111827;
-        border-radius: 8px;
-        color: #f9fafb;
-        overflow-x: auto;
-        padding: 16px;
-      }
-    </style>
-  </head>
-  <body>
-    <h1>Runtime Workspace UI: Control Desk and Provider TUI</h1>
+  <main class="page">
+    <div class="doc-head">
+      <span class="eyebrow">Runtime · Surfaces</span>
+      <h1>Control Desk &amp; provider TUI</h1>
+      <p class="dek">
+        The supervisory surface and the execution surface are two different things. Curator's
+        workbench reads the ledger and tells you what is happening; the provider's own TUI is
+        where native approvals and interactive input actually happen. The
+        <strong>ledger stays the system of record</strong> either way.
+      </p>
+    </div>
 
-    <h2>What</h2>
-    <p>
-      The current UI is a Phase 0 runtime workbench over a SQLite ledger. The target
-      Control Desk in the blueprint is a supervisory surface for Project, Session,
-      Goal, Task, Execution, Agent, Provider, Artifact, Approval, and Event state. It
-      does not replace the provider's native interactive TUI.
-    </p>
+    <figure class="figure">
+      <div class="mermaid">
+flowchart LR
+  U(["You"]):::live --> CD["Control surface<br/><small>workbench today · Control Desk target</small>"]:::live
+  CD -- "reads / navigates" --> L[("SQLite ledger<br/><small>system of record</small>")]:::ledger
+  CD -. "focus" .-> TUI["Provider TUI<br/><small>native approval &amp; input</small>"]:::review
+  TUI == "state written back" ==> L
+  classDef live fill:#0e1a33,stroke:#3b8cff,stroke-width:1.5px,color:#eaf1ff;
+  classDef review fill:#170f2e,stroke:#8b5cf6,stroke-width:1.5px,color:#ece3ff;
+  classDef ledger fill:#0a0f1f,stroke:#33406a,stroke-width:1.4px,color:#9fb0d6;
+      </div>
+      <div class="figure-cap"><b>Figure 1.</b><span>The control surface supervises; the provider TUI executes; both reconcile through the ledger.</span></div>
+      <div class="figure-legend">
+        <span class="leg"><span class="swatch" style="background:#3b8cff"></span>control surface</span>
+        <span class="leg"><span class="swatch" style="background:#8b5cf6"></span>provider TUI</span>
+        <span class="leg"><span class="swatch" style="background:#0a0f1f;border:1px solid #33406a"></span>ledger</span>
+      </div>
+    </figure>
 
-    <h2>How</h2>
-    <p>
-      The CLI uses <code>/workbench</code> as the main Phase 0 view. Stable slot IDs
-      such as <code>writer.default</code> and <code>reviewer.default</code> are the
-      compatibility vocabulary for the current implementation. Supporting commands
-      expose focused slices of state without requiring the user to inspect SQLite.
-    </p>
-    <pre><code>/workbench
-/agents
-/providers
-/agent status writer.default
-/agent bind writer.default codex-work
-/agent switch writer.default claude-team
-/queue
-/queue tick
-/approvals
-/approve approval-id optional message
-/reject approval-id optional message
-/evidence
-/node current
+    <section class="sec" id="what">
+      <div class="sec-eyebrow"><span class="mark">W</span> What</div>
+      <h2>A workbench today, a Control Desk next</h2>
+      <p>
+        The current UI is a Phase 0 runtime workbench over a SQLite ledger. The target Control
+        Desk in the blueprint is a supervisory surface for Project, Session, Goal, Task,
+        Execution, Agent, Provider, Artifact, Approval, and Event state. It does not replace
+        the provider's native interactive TUI.
+      </p>
+    </section>
+
+    <section class="sec" id="how">
+      <div class="sec-eyebrow"><span class="mark">H</span> How</div>
+      <h2>Commands and panels over the ledger</h2>
+      <p>
+        The CLI uses <code>/workbench</code> as the main Phase 0 view. Stable slot IDs such as
+        <code>writer.default</code> and <code>reviewer.default</code> are the compatibility
+        vocabulary for the current implementation. Supporting commands expose focused slices
+        of state without requiring the user to inspect SQLite.
+      </p>
+      <pre><code>/workbench                         /queue
+/agents                            /queue tick
+/providers                         /approvals
+/agent status writer.default       /approve approval-id optional message
+/agent bind writer.default codex   /reject approval-id optional message
+/agent switch writer.default team  /evidence · /node current
 /resume continue with this narrower fix</code></pre>
-    <p>
-      The shell workspace reads the SQLite runtime ledger directly. The Textual TUI
-      renders separate <code>WorkflowSnapshot</code> panels for Runtime, Active Roles,
-      Providers, Evidence, and Events, and shows live escaped provider output while a
-      run is active. Transcript text is temporary UI output and is not replayed; lifecycle,
-      tool, and bounded <code>OUTPUT_CHUNK</code> events are ledgered. In the target model, these panels become the
-      Control Desk and show task dependencies, worker leases, heartbeat age, approval
-      requests, artifact references, and blockers. The provider's Claude Code or Codex
-      TUI remains the place where native approval and interactive input are handled;
-      the Control Desk only focuses or navigates to that surface and synchronizes the
-      resulting state.
-    </p>
+      <p>
+        The shell workspace reads the SQLite runtime ledger directly. The Textual TUI renders
+        separate <code>WorkflowSnapshot</code> panels for Runtime, Active Roles, Providers,
+        Evidence, and Events, and shows live escaped provider output while a run is active.
+      </p>
+      <div class="callout">
+        <strong>Transcript is not the record:</strong> live transcript text is temporary UI
+        output and is not replayed. Lifecycle, tool, and bounded <code>OUTPUT_CHUNK</code>
+        events are ledgered. In the target model these panels become the Control Desk and add
+        task dependencies, worker leases, heartbeat age, approval requests, artifact
+        references, and blockers. The Claude Code or Codex TUI remains where native approval
+        and interactive input are handled; the Control Desk only focuses that surface and
+        synchronizes the resulting state.
+      </div>
+    </section>
 
-    <h2>Why</h2>
-    <p>
-      Users need to know which task and runtime are active, which provider capability
-      is being invoked, whether an approval or lease is blocking progress, what evidence
-      exists, and which action will move the system forward. Keeping this supervisory
-      state outside provider transcripts is required for auditability and recovery.
-    </p>
+    <section class="sec" id="why">
+      <div class="sec-eyebrow"><span class="mark">Y</span> Why</div>
+      <h2>Supervisory state must outlive the transcript</h2>
+      <p>
+        Users need to know which task and runtime are active, which provider capability is
+        being invoked, whether an approval or lease is blocking progress, what evidence
+        exists, and which action will move the system forward. Keeping this supervisory state
+        outside provider transcripts is required for auditability and recovery.
+      </p>
+    </section>
 
-    <h2>Future improvements/considerations/trade-offs</h2>
-    <p>
-      Phase 0 remains sequential and single-writer. Future work can add task DAG
-      visualization, lease/heartbeat views, tmux-backed provider windows, runtime handoff
-      snapshots, and capability approval workflows. Automatic provider switching should wait for capability detection,
-      quota sources, explicit approval policy, and a tested trust boundary.
-    </p>
-  </body>
+    <section class="sec" id="future">
+      <div class="sec-eyebrow"><span class="mark">F</span> Future · considerations · trade-offs</div>
+      <h2>What waits for the trust boundary</h2>
+      <p>
+        Phase 0 remains sequential and single-writer. Future work can add task DAG
+        visualization, lease/heartbeat views, tmux-backed provider windows, runtime handoff
+        snapshots, and capability approval workflows. Automatic provider switching should wait
+        for capability detection, quota sources, explicit approval policy, and a tested trust
+        boundary.
+      </p>
+    </section>
+  </main>
+
+  <footer class="doc-foot">
+    <div class="foot-eyebrow">Curator documentation</div>
+    <nav class="doc-index">
+      <a href="orchestration.html"><span class="di-title">Orchestration &amp; runtime boundary</span><span class="di-desc">The Phase 0 control loop and the V1 blueprint boundary.</span></a>
+      <a href="provider-profile-layer.html"><span class="di-title">Provider &amp; runtime identity</span><span class="di-desc">Agent, Provider, AgentRuntime, and Execution.</span></a>
+      <a class="current" href="runtime-workspace-ui.html"><span class="di-title">Runtime workspace UI</span><span class="di-desc">The workbench today, the Control Desk target.</span></a>
+      <a href="shell-adapter-boundary.html"><span class="di-title">Shell adapter boundary</span><span class="di-desc">What shell may do vs the Python control plane.</span></a>
+      <a href="future-optimizations.html"><span class="di-title">Future optimizations</span><span class="di-desc">The evidence-driven runtime kernel backlog.</span></a>
+      <a href="v0-alpha-release-plan-v3.html"><span class="di-title">v0.1.0 release plan (v3)</span><span class="di-desc">Release gates and the V1.1–V1.6 ladder.</span></a>
+      <a href="v0-alpha-implementation-status.html"><span class="di-title">Implementation status</span><span class="di-desc">What PR1–PR5 actually landed.</span></a>
+      <a href="release-notes-v0.1.0.html"><span class="di-title">v0.1.0 release notes</span><span class="di-desc">What ships, and the known limits.</span></a>
+      <a href="orca-parallel-orchestration-and-task-memory.html"><span class="di-title">Parallel orchestration &amp; task memory</span><span class="di-desc">Orca's parallelism as evidence-backed state.</span></a>
+    </nav>
+    <div class="foot-meta"><span class="chip live">Phase 0</span> local · single-writer · sequential — the V1 blueprint is a migration target, not current capability.</div>
+  </footer>
+
+  <script type="module" src="assets/curator-mermaid.js"></script>
+</body>
 </html>

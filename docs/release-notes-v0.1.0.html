@@ -1,41 +1,107 @@
 <!doctype html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Curator v0.1.0 Release Notes</title>
-  </head>
-  <body>
-    <article>
-      <h1>Curator v0.1.0 Release Notes</h1>
-      <h2>What</h2>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Curator · v0.1.0 Release Notes</title>
+  <link rel="stylesheet" href="assets/curator-docs.css" />
+</head>
+<body id="top">
+
+  <header class="masthead">
+    <a class="wordmark" href="#top"><span class="loop">↻</span><span class="name">Curator</span></a>
+    <span class="mast-spacer"></span>
+    <div class="phase-legend">
+      <span class="chip live">Live · Phase 0</span>
+      <span class="chip target">Target · V1</span>
+    </div>
+  </header>
+
+  <main class="page">
+    <div class="doc-head">
+      <span class="eyebrow">Release · v0.1.0</span>
+      <h1>v0.1.0 release notes</h1>
+      <p class="dek">
+        本机、单写入者、顺序工作流的 Phase 0 发布：<strong>Goal → writer → deterministic
+        verifier → fresh-context reviewer → human confirmation</strong>。SQLite ledger 保存
+        状态、事件、provider run、evidence、pause 和 resume 记录。
+      </p>
+    </div>
+
+    <figure class="figure">
+      <div class="mermaid">
+flowchart LR
+  G(["Goal"]):::live --> W["writer"]:::live --> V{"verifier<br/><small>deterministic</small>"}:::verify --> R["reviewer<br/><small>fresh context</small>"]:::review --> H{{"human confirm"}}:::gate --> D(["done"]):::pass
+  classDef live fill:#0e1a33,stroke:#3b8cff,stroke-width:1.5px,color:#eaf1ff;
+  classDef verify fill:#0c2318,stroke:#43e2a4,stroke-width:1.5px,color:#d6ffe9;
+  classDef review fill:#170f2e,stroke:#8b5cf6,stroke-width:1.5px,color:#ece3ff;
+  classDef gate fill:#241a06,stroke:#ffc24b,stroke-width:1.5px,color:#ffe9bf;
+  classDef pass fill:#0c2b1d,stroke:#43e2a4,stroke-width:1.8px,color:#c9ffe6;
+      </div>
+      <div class="figure-cap"><b>图 1.</b><span>v0.1.0 的顺序单写入者交付链。</span></div>
+    </figure>
+
+    <section class="sec" id="what">
+      <div class="sec-eyebrow"><span class="mark">W</span> What</div>
+      <h2>本次发布内容</h2>
       <p>
         Curator v0.1.0 是本机、单写入者、顺序工作流的 Phase 0 发布：Goal → writer →
         deterministic verifier → fresh-context reviewer → human confirmation。SQLite ledger
-        保存状态、事件、provider run、evidence、pause 和 resume 记录。V1.1–V1.6 阶梯及其
-        目标边界见 <a href="v0-alpha-release-plan-v3.html">v3 发布计划</a>。
+        保存状态、事件、provider run、evidence、pause 和 resume 记录。V1.1–V1.6 阶梯及其目标边界见
+        <a href="v0-alpha-release-plan-v3.html">v3 发布计划</a>。
       </p>
-      <h2>How</h2>
+    </section>
+
+    <section class="sec" id="how">
+      <div class="sec-eyebrow"><span class="mark">H</span> How</div>
+      <h2>运行时边界</h2>
       <ul>
         <li>事务使用 connection factory、WAL 和 nested SAVEPOINT；项目写操作通过 <code>.curator/runtime.lock</code> 串行化。</li>
         <li>机器重启后，reconcile 会把残留 execution 标为 FAILED，生成新的 interrupted pause attempt，随后可用 <code>/resume</code> 继续。</li>
         <li>Ctrl+C/Esc、timeout 和 provider error 会记录 stopped_by/stop_reason；provider CLI 以独立进程组运行并清理进程组。</li>
-        <li>prompt/context 通过 stdin 传输，不放入 argv；实时 OUTPUT_CHUNK 以最多 4 KiB 的 text 事件写入 ledger，transcript 仅是 UI 临时输出、不做回放。</li>
+        <li>prompt/context 通过 stdin 传输，不放入 argv；实时 <code>OUTPUT_CHUNK</code> 以最多 4 KiB 的 text 事件写入 ledger，transcript 仅是 UI 临时输出、不做回放。</li>
         <li>TUI 支持历史、Tab 补全、Shift+Enter/Ctrl+J 续行、动画 spinner/耗时和语义色彩；暂停问题直接显示，并在启动异常或用户中断后写入脱敏的 <code>.curator/errors.log</code>。</li>
       </ul>
-      <h2>Why</h2>
+    </section>
+
+    <section class="sec" id="why">
+      <div class="sec-eyebrow"><span class="mark">Y</span> Why</div>
+      <h2>为什么是这些边界</h2>
       <p>
-        这些边界让失败和中断可见、可审计、可恢复，同时避免把 provider transcript 当作系统事实。
-        单写入者设计适合 Phase 0 的 workspace ownership；它也为未来的 canonical model、runtime
-        registry、lease/heartbeat、handoff 和并行 worker 留出迁移路径。
+        这些边界让失败和中断可见、可审计、可恢复，同时避免把 provider transcript 当作系统事实。单写入者
+        设计适合 Phase 0 的 workspace ownership；它也为未来的 canonical model、runtime registry、
+        lease/heartbeat、handoff 和并行 worker 留出迁移路径。
       </p>
-      <h2>Future improvements/considerations/trade-offs</h2>
+    </section>
+
+    <section class="sec" id="future">
+      <div class="sec-eyebrow"><span class="mark">F</span> Future · considerations · trade-offs</div>
+      <h2>已知限制</h2>
       <ul>
-        <li>已知限制：串行单写入者；flock 仅本地盘；mock 路径取消有延迟；TUI 粘贴多行会折叠为一次提交，需用 Shift+Enter/Ctrl+J 进行显式续行。</li>
+        <li>串行单写入者；flock 仅本地盘；mock 路径取消有延迟；TUI 粘贴多行会折叠为一次提交，需用 Shift+Enter/Ctrl+J 进行显式续行。</li>
         <li>provider 要求：本地可执行且已登录的 Claude Code 或 Codex CLI；缺失 provider 会阻塞或暂停，不会伪造成功。</li>
         <li>平台边界：macOS 主测、Linux CI、Windows 未支持；killpg 对 provider 自建进程组的逃逸仍需实际 CLI 版本 smoke。</li>
         <li>V1 不属于本发布：DAG、并行 worker、native Provider TUI、Capability Registry 和 Runtime Handoff。</li>
       </ul>
-    </article>
-  </body>
+    </section>
+  </main>
+
+  <footer class="doc-foot">
+    <div class="foot-eyebrow">Curator documentation</div>
+    <nav class="doc-index">
+      <a href="orchestration.html"><span class="di-title">Orchestration &amp; runtime boundary</span><span class="di-desc">The Phase 0 control loop and the V1 blueprint boundary.</span></a>
+      <a href="provider-profile-layer.html"><span class="di-title">Provider &amp; runtime identity</span><span class="di-desc">Agent, Provider, AgentRuntime, and Execution.</span></a>
+      <a href="runtime-workspace-ui.html"><span class="di-title">Runtime workspace UI</span><span class="di-desc">The workbench today, the Control Desk target.</span></a>
+      <a href="shell-adapter-boundary.html"><span class="di-title">Shell adapter boundary</span><span class="di-desc">What shell may do vs the Python control plane.</span></a>
+      <a href="future-optimizations.html"><span class="di-title">Future optimizations</span><span class="di-desc">The evidence-driven runtime kernel backlog.</span></a>
+      <a href="v0-alpha-release-plan-v3.html"><span class="di-title">v0.1.0 release plan (v3)</span><span class="di-desc">Release gates and the V1.1–V1.6 ladder.</span></a>
+      <a href="v0-alpha-implementation-status.html"><span class="di-title">Implementation status</span><span class="di-desc">What PR1–PR5 actually landed.</span></a>
+      <a class="current" href="release-notes-v0.1.0.html"><span class="di-title">v0.1.0 release notes</span><span class="di-desc">What ships, and the known limits.</span></a>
+      <a href="orca-parallel-orchestration-and-task-memory.html"><span class="di-title">Parallel orchestration &amp; task memory</span><span class="di-desc">Orca's parallelism as evidence-backed state.</span></a>
+    </nav>
+    <div class="foot-meta"><span class="chip live">Phase 0</span> local · single-writer · sequential — the V1 blueprint is a migration target, not current capability.</div>
+  </footer>
+
+  <script type="module" src="assets/curator-mermaid.js"></script>
+</body>
 </html>
