@@ -6,7 +6,7 @@ through. StreamRedactor holds back a small tail across feeds so the whole secret
 seen together before any of it is emitted.
 """
 
-from curator.providers.redact import StreamRedactor
+from curator.providers.redact import _STREAM_MAX_BUFFER_CHARS, StreamRedactor, redact_secrets
 
 
 def test_stream_redactor_scrubs_secret_split_across_two_chunks() -> None:
@@ -66,3 +66,28 @@ def test_stream_redactor_passes_clean_text_through_without_corruption() -> None:
     out += redactor.flush()
 
     assert out == "hello wonderful world"
+
+
+def test_stream_redactor_preserves_transcript_across_buffer_reset() -> None:
+    """A secret straddling the internal buffer reset is redacted without dropping text.
+
+    Once the raw buffer passes _STREAM_MAX_BUFFER_CHARS the redactor compacts it. Because
+    redaction shrinks the buffer, an emitted-vs-held offset computed in raw coordinates
+    silently dropped the characters between the two — so the streamed result must match a
+    single whole-string redaction byte for byte.
+    """
+    lead = "a" * (_STREAM_MAX_BUFFER_CHARS - 36)
+    secret_chunk = " token=SUPERSECRETVALUE0123456789ABCDEF "  # pushes the buffer past reset
+    tail = "TAILMARKER-END"
+
+    redactor = StreamRedactor()
+    streamed = redactor.scrub(lead)
+    streamed += redactor.scrub(secret_chunk)
+    streamed += redactor.scrub(tail)
+    streamed += redactor.flush()
+
+    assert streamed == redact_secrets(lead + secret_chunk + tail)  # nothing dropped
+    assert streamed.count("a") == len(lead)  # every clean lead-in char survives
+    assert "SUPERSECRETVALUE0123456789ABCDEF" not in streamed
+    assert "0123456789ABCDEF" not in streamed  # not even a fragment leaks
+    assert streamed.endswith("TAILMARKER-END")

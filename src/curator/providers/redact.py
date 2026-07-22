@@ -38,8 +38,8 @@ def redact_error(value: str | None, limit: int = _MAX_ERROR_CHARS) -> str:
 # the longest key token ("password") plus its separator, so 64 leaves generous headroom.
 _STREAM_TAIL_HOLD_CHARS = 64
 # Bound the working buffer so an enormous single step cannot make redaction super-linear.
-# Anything past this is already emitted-stable; a secret would have to span the whole
-# window to straddle the reset, which no real credential does.
+# On overflow scrub() compacts to the trailing half of this window; a secret would have to
+# span that half to straddle the cut, which no real credential does.
 _STREAM_MAX_BUFFER_CHARS = 1 << 16
 
 
@@ -52,6 +52,13 @@ class StreamRedactor:
     seen intact), and emits only the portion that can no longer change — holding back a
     short tail where a match might still be forming. ``flush`` releases the remainder once
     the stream ends.
+
+    Emission contract: the output is the **redacted transcript as a continuous delta** —
+    concatenating every ``scrub`` result plus the final ``flush`` yields exactly what
+    ``redact_secrets`` produces over the whole raw stream. Source chunk boundaries are NOT
+    preserved: an input chunk may emit nothing (its bytes are held back) while a later feed
+    emits it, so OUTPUT_CHUNK ledger rows are a faithful redacted transcript, not a
+    per-source-chunk record. Callers needing chunk correspondence must track it separately.
     """
 
     def __init__(self, hold: int = _STREAM_TAIL_HOLD_CHARS) -> None:
@@ -68,10 +75,16 @@ class StreamRedactor:
         delta = stable[self._emitted :]
         self._emitted = len(stable)
         if len(self._buffer) > _STREAM_MAX_BUFFER_CHARS:
-            # Drop the already-stable prefix and keep only the unemitted tail so cost and
-            # memory stay bounded; the retained tail preserves boundary detection.
-            self._buffer = self._buffer[-self._hold :]
-            self._emitted = 0
+            # Compact the buffer so cost and memory stay bounded. ``_emitted`` counts
+            # *redacted* chars already released, so the dropped prefix must be discounted
+            # in the same coordinate space — dropping raw chars alone (and resetting
+            # ``_emitted`` to 0) silently loses the redacted length difference between the
+            # raw prefix and its scrubbed form. Keeping a generous suffix makes a match
+            # straddling the cut vanishingly unlikely, matching the whole-buffer guarantee.
+            keep = _STREAM_MAX_BUFFER_CHARS // 2
+            dropped = self._buffer[:-keep]
+            self._emitted -= len(redact_secrets(dropped))
+            self._buffer = self._buffer[-keep:]
         return delta
 
     def flush(self) -> str:

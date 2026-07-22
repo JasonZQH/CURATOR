@@ -3,6 +3,7 @@
 from datetime import UTC, datetime
 
 from curator.core.enums import (
+    EventType,
     EvidenceKind,
     HarnessStatus,
     LoopDecisionType,
@@ -15,12 +16,14 @@ from curator.core.enums import (
 )
 from curator.core.schema import HarnessRunSpec, QAValidationOutput, RoleContract
 from curator.loops.compiler import compile_coding_delivery_plan
+from curator.providers.contracts import ProviderCancelledError
 from curator.providers.events import ProviderEvent, ProviderEventKind
 from fakes import CodingDeliveryFakeProvider
 from curator.scheduler.engine import create_workflow_session, run_workflow
 from curator.roles.registry import default_role_contracts
 from curator.state.db import CuratorConnection, connect_database, initialize_database
 from curator.state.repositories import (
+    load_events_for_session,
     load_evidence_refs_for_run,
     load_loop_decisions_for_run,
     load_loop_iterations_for_run,
@@ -571,3 +574,153 @@ def test_provider_streaming_coalesces_ledger_commits(tmp_path, monkeypatch):
         return counter["commits"]
 
     assert _run_and_count("few", 5) == _run_and_count("many", 200)
+
+
+class _StreamThenFailDriver:
+    """Stream OUTPUT_CHUNK events, then raise as if the provider run failed."""
+
+    def __init__(self, chunk_count: int = 4) -> None:
+        """Fix how many diagnostic chunks stream before the run fails."""
+        self._chunk_count = chunk_count
+        self.provider_name = ProviderName.CLAUDE_CODE
+        self.provider_profile_id = None
+        self.provider_session_id = None
+        self.quota_status = None
+
+    async def run(self, spec, request, on_event=None):
+        """Stream chunks, then raise a timeout to model a mid-run provider failure."""
+        for index in range(self._chunk_count):
+            if on_event is not None:
+                on_event(
+                    ProviderEvent(
+                        kind=ProviderEventKind.OUTPUT_CHUNK,
+                        provider_run_id=spec.id,
+                        sequence=index + 1,
+                        payload={"text": f"diagnostic-chunk-{index}"},
+                    )
+                )
+        raise TimeoutError("Provider run timed out after 1800s")
+
+
+def test_streamed_transcript_persists_when_provider_fails(tmp_path):
+    """Verify a failed provider run keeps its streamed transcript on the ledger.
+
+    The failing run is exactly the one whose output matters most for debugging, so its
+    OUTPUT_CHUNK events must survive the provider error instead of rolling back with the
+    step transaction. The loop still pauses for human handoff as before.
+    """
+    now = datetime(2026, 6, 25, 14, 30, tzinfo=UTC)
+    connection = connect_database(tmp_path / "curator.sqlite")
+    initialize_database(connection)
+    session_id = create_workflow_session(connection, tmp_path, created_at=now)
+
+    run_workflow(connection, session_id, _StreamThenFailDriver(chunk_count=4), created_at=now)
+
+    events = load_events_for_session(connection, session_id)
+    output_chunks = [
+        event for event in events if event.type is EventType.PROVIDER_OUTPUT_CHUNK
+    ]
+    loop_run = load_loop_runs_for_session(connection, session_id)[-1]
+    connection.close()
+
+    assert len(output_chunks) == 4
+    assert loop_run.status is LoopStatus.PAUSED
+
+
+class _StreamThenTypedCancelDriver(_StreamThenFailDriver):
+    """Stream chunks, then raise the typed ProviderCancelledError (the CLI-adapter path)."""
+
+    async def run(self, spec, request, on_event=None):
+        """Stream chunks, then cancel the way the bundled CLI adapters signal cancellation."""
+        for index in range(self._chunk_count):
+            if on_event is not None:
+                on_event(
+                    ProviderEvent(
+                        kind=ProviderEventKind.OUTPUT_CHUNK,
+                        provider_run_id=spec.id,
+                        sequence=index + 1,
+                        payload={"text": f"diagnostic-chunk-{index}"},
+                    )
+                )
+        raise ProviderCancelledError("Provider run cancelled by user.")
+
+
+class _StreamThenHardCancelDriver(_StreamThenFailDriver):
+    """Stream chunks, then raise a bare asyncio.CancelledError (hard cancel)."""
+
+    async def run(self, spec, request, on_event=None):
+        """Stream chunks, then propagate a raw cancellation straight through the driver."""
+        import asyncio
+
+        for index in range(self._chunk_count):
+            if on_event is not None:
+                on_event(
+                    ProviderEvent(
+                        kind=ProviderEventKind.OUTPUT_CHUNK,
+                        provider_run_id=spec.id,
+                        sequence=index + 1,
+                        payload={"text": f"diagnostic-chunk-{index}"},
+                    )
+                )
+        raise asyncio.CancelledError()
+
+
+def _output_chunk_count(connection, session_id: str) -> int:
+    """Return how many provider OUTPUT_CHUNK events are persisted for a session."""
+    return len(
+        [
+            event
+            for event in load_events_for_session(connection, session_id)
+            if event.type is EventType.PROVIDER_OUTPUT_CHUNK
+        ]
+    )
+
+
+def test_typed_provider_cancel_preserves_streamed_transcript(tmp_path):
+    """Verify the CLI-adapter cancel path (ProviderCancelledError) keeps its transcript.
+
+    Both bundled adapters convert a cancel into this typed error, so its streamed output
+    must survive on the ledger and the loop must pause for user input.
+    """
+    now = datetime(2026, 6, 25, 14, 30, tzinfo=UTC)
+    connection = connect_database(tmp_path / "curator.sqlite")
+    initialize_database(connection)
+    session_id = create_workflow_session(connection, tmp_path, created_at=now)
+
+    run_workflow(
+        connection, session_id, _StreamThenTypedCancelDriver(chunk_count=4), created_at=now
+    )
+
+    chunks = _output_chunk_count(connection, session_id)
+    loop_run = load_loop_runs_for_session(connection, session_id)[-1]
+    connection.close()
+
+    assert chunks == 4
+    assert loop_run.status is LoopStatus.PAUSED
+
+
+def test_hard_cancel_rolls_back_in_flight_transcript_batch(tmp_path):
+    """Document the boundary: a bare asyncio.CancelledError rolls back the in-flight batch.
+
+    The step commits its streamed transcript in one transaction, which rolls back on any
+    BaseException — so a raw cancellation propagating straight through the driver discards
+    the in-flight OUTPUT_CHUNK rows and reconciles the run rather than pausing cleanly. The
+    bundled CLI adapters avoid this by converting cancellation to ProviderCancelledError
+    (see test_typed_provider_cancel_preserves_streamed_transcript).
+    """
+    now = datetime(2026, 6, 25, 14, 30, tzinfo=UTC)
+    connection = connect_database(tmp_path / "curator.sqlite")
+    initialize_database(connection)
+    session_id = create_workflow_session(connection, tmp_path, created_at=now)
+
+    # Must not raise: run_workflow catches the cancellation and reconciles.
+    run_workflow(
+        connection, session_id, _StreamThenHardCancelDriver(chunk_count=4), created_at=now
+    )
+
+    chunks = _output_chunk_count(connection, session_id)
+    loop_run = load_loop_runs_for_session(connection, session_id)[-1]
+    connection.close()
+
+    assert chunks == 0  # in-flight streamed batch rolled back with the transaction
+    assert loop_run.status is not LoopStatus.DONE
