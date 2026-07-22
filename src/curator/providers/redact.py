@@ -52,6 +52,13 @@ class StreamRedactor:
     seen intact), and emits only the portion that can no longer change — holding back a
     short tail where a match might still be forming. ``flush`` releases the remainder once
     the stream ends.
+
+    Emission contract: the output is the **redacted transcript as a continuous delta** —
+    concatenating every ``scrub`` result plus the final ``flush`` yields exactly what
+    ``redact_secrets`` produces over the whole raw stream. Source chunk boundaries are NOT
+    preserved: an input chunk may emit nothing (its bytes are held back) while a later feed
+    emits it, so OUTPUT_CHUNK ledger rows are a faithful redacted transcript, not a
+    per-source-chunk record. Callers needing chunk correspondence must track it separately.
     """
 
     def __init__(self, hold: int = _STREAM_TAIL_HOLD_CHARS) -> None:

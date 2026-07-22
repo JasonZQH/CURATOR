@@ -8,7 +8,7 @@ Curator orchestrates real provider CLIs like **Claude Code** and **Codex** throu
 auditable control plane: it plans an accepted goal, dispatches a single writer, gates the
 loop on **deterministic verification**, runs a **fresh-context reviewer**, and pauses for
 you at a human confirmation gate — recording every decision, evidence ref, and pause to a
-local, replayable ledger.
+durable local ledger you can resume from.
 
 [![CI](https://github.com/JasonZQH/CURATOR/actions/workflows/ci.yml/badge.svg)](https://github.com/JasonZQH/CURATOR/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -29,8 +29,8 @@ why, and you can resume it later from durable state instead of starting over.
 | **Real providers, not a wrapper** | Dispatches the Claude Code and Codex CLIs behind an async streaming driver — tool calls, permissions, and output flow through as typed events, not an opaque chat. |
 | **The scheduler owns control flow** | Providers produce typed output; Curator alone decides continue, retry, pause, stop, and resume. Control flow never hides inside a transcript. |
 | **Deterministic verification** | The loop exits on real test/command results with content-hashed evidence — not on a model's self-reported "looks good." |
-| **Fresh-context review** | A second provider reviews the implementation and verification evidence without the writer's context, catching what the author cannot see. |
-| **Everything is on the ledger** | Every iteration, decision-with-reason, provider run, evidence ref, pause, and resume is a durable SQLite row under `.curator/`. Runs are auditable and replayable. |
+| **Fresh-context review** | A second provider reviews the implementation and verification evidence without the writer's context and surfaces what the author cannot see. Its findings inform the human confirm gate — the reviewer is advisory and does not automatically block delivery. |
+| **Everything is on the ledger** | Every iteration, decision-with-reason, provider run, evidence ref, pause, and resume is a durable SQLite row under `.curator/`. Runs are auditable, and paused loops resume from that durable state. |
 | **Resume from anywhere** | Paused a loop yesterday? `/resume` rebuilds execution state from the ledger and continues — a confirm-gate "yes" finishes it, anything else re-runs the writer with your guidance. |
 | **A memory that learns** | Retries, failures, and pauses are distilled into memory entries and injected into future context packages, so the agent carries lessons forward. Inspect them with `/memory`. |
 | **Local-first, no fallback theater** | No synthetic provider. A missing or broken CLI blocks setup and an unconfigured run pauses with next steps — never fake success. |
@@ -108,6 +108,28 @@ Agent/AgentRuntime/ExecutionRuntime identities, capability approvals, artifact a
 manifests, worker leases and heartbeats, provider-native TUI handoff, and bounded parallel
 workers. Until those pieces are implemented and tested, this README intentionally describes
 the sequential Phase 0 behavior above.
+
+## Known limitations
+
+Phase 0 is deliberately narrow. Where a claim above could be read more broadly than the
+code delivers, the boundary is spelled out here (see also the
+[v0.1.0 release notes](docs/release-notes-v0.1.0.html)):
+
+- **Serial, single-writer.** One writer runs at a time; there is no parallel worker or
+  dependency-aware DAG yet. Project writes are serialized through a local `flock`
+  (`.curator/runtime.lock`), which does not coordinate across network filesystems.
+- **The auditable system-of-record is the decisions, not the transcript.** The durable,
+  queryable truth is the iteration / decision-with-reason / evidence / provider-run rows.
+  Provider stdout is persisted as `OUTPUT_CHUNK` rows that are a **redacted, continuous
+  delta** of the stream — they do not map one-to-one to source chunks and the transcript
+  is not replayed. `/resume` rebuilds execution state from the decision/evidence rows, not
+  from the transcript.
+- **Cancellation boundary.** The bundled Claude Code and Codex adapters convert a cancel
+  into a typed error, and that run's streamed transcript is preserved on the ledger. A
+  bare `asyncio.CancelledError` propagating straight through rolls back the in-flight
+  streamed batch by design (the step commits its transcript in one transaction).
+- **Platform.** macOS is the primary test target, Linux runs in CI, and Windows is
+  unsupported (use WSL2).
 
 ## Command reference
 
