@@ -3,6 +3,7 @@
 from datetime import UTC, datetime
 
 from curator.core.enums import (
+    EventType,
     EvidenceKind,
     HarnessStatus,
     LoopDecisionType,
@@ -21,6 +22,7 @@ from curator.scheduler.engine import create_workflow_session, run_workflow
 from curator.roles.registry import default_role_contracts
 from curator.state.db import CuratorConnection, connect_database, initialize_database
 from curator.state.repositories import (
+    load_events_for_session,
     load_evidence_refs_for_run,
     load_loop_decisions_for_run,
     load_loop_iterations_for_run,
@@ -571,3 +573,54 @@ def test_provider_streaming_coalesces_ledger_commits(tmp_path, monkeypatch):
         return counter["commits"]
 
     assert _run_and_count("few", 5) == _run_and_count("many", 200)
+
+
+class _StreamThenFailDriver:
+    """Stream OUTPUT_CHUNK events, then raise as if the provider run failed."""
+
+    def __init__(self, chunk_count: int = 4) -> None:
+        """Fix how many diagnostic chunks stream before the run fails."""
+        self._chunk_count = chunk_count
+        self.provider_name = ProviderName.CLAUDE_CODE
+        self.provider_profile_id = None
+        self.provider_session_id = None
+        self.quota_status = None
+
+    async def run(self, spec, request, on_event=None):
+        """Stream chunks, then raise a timeout to model a mid-run provider failure."""
+        for index in range(self._chunk_count):
+            if on_event is not None:
+                on_event(
+                    ProviderEvent(
+                        kind=ProviderEventKind.OUTPUT_CHUNK,
+                        provider_run_id=spec.id,
+                        sequence=index + 1,
+                        payload={"text": f"diagnostic-chunk-{index}"},
+                    )
+                )
+        raise TimeoutError("Provider run timed out after 1800s")
+
+
+def test_streamed_transcript_persists_when_provider_fails(tmp_path):
+    """Verify a failed provider run keeps its streamed transcript on the ledger.
+
+    The failing run is exactly the one whose output matters most for debugging, so its
+    OUTPUT_CHUNK events must survive the provider error instead of rolling back with the
+    step transaction. The loop still pauses for human handoff as before.
+    """
+    now = datetime(2026, 6, 25, 14, 30, tzinfo=UTC)
+    connection = connect_database(tmp_path / "curator.sqlite")
+    initialize_database(connection)
+    session_id = create_workflow_session(connection, tmp_path, created_at=now)
+
+    run_workflow(connection, session_id, _StreamThenFailDriver(chunk_count=4), created_at=now)
+
+    events = load_events_for_session(connection, session_id)
+    output_chunks = [
+        event for event in events if event.type is EventType.PROVIDER_OUTPUT_CHUNK
+    ]
+    loop_run = load_loop_runs_for_session(connection, session_id)[-1]
+    connection.close()
+
+    assert len(output_chunks) == 4
+    assert loop_run.status is LoopStatus.PAUSED

@@ -922,16 +922,24 @@ async def _execute_provider_step(
         # Coalesce the per-event ledger writes: streaming providers emit many
         # OUTPUT_CHUNK/lifecycle events, and each insert_event would otherwise COMMIT
         # (fsync) on the event-loop thread. One transaction commits them once at step
-        # end. The RUNNING iteration/provider_run above are committed before this block
-        # so crash recovery still sees them; only the streamed transcript rolls back.
+        # end. A mid-run provider failure (timeout/cancel/crash) is not a database error,
+        # and the transcript up to that point is the most valuable audit evidence — so the
+        # error is caught inside the block, letting the transaction commit the streamed
+        # events, and only re-raised afterward into the failure handling below.
+        harness_error: Exception | None = None
         with transaction(connection):
-            result = await run_harness_async(
-                spec,
-                driver,
-                provider_request,
-                created_at=step_started_at,
-                on_event=recorder,
-            )
+            try:
+                result = await run_harness_async(
+                    spec,
+                    driver,
+                    provider_request,
+                    created_at=step_started_at,
+                    on_event=recorder,
+                )
+            except Exception as error:  # noqa: BLE001 - re-raised after the commit
+                harness_error = error
+        if harness_error is not None:
+            raise harness_error
         runtime_decision = _decision_for_provider_signal(result) or decide_runtime(
             step, result, role_contracts=ctx.role_contracts
         )
