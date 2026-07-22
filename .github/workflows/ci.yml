@@ -10,6 +10,33 @@ on:
       - "v*"
 
 jobs:
+  guard:
+    name: Guard — no committed state or mock provider
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Assert no committed Curator state or SQLite ledgers
+        run: |
+          set -euo pipefail
+          bad="$(git ls-files | grep -E '(^|/)\.curator/|\.sqlite$|\.sqlite3$' || true)"
+          if [ -n "$bad" ]; then
+            echo "::error::Local Curator state / SQLite ledgers must never be committed (seed/mock runtime data):"
+            echo "$bad"
+            exit 1
+          fi
+          echo "OK: no committed .curator/ state or *.sqlite ledgers."
+      - name: Assert shipping code defines no synthetic provider
+        run: |
+          set -euo pipefail
+          bad="$(grep -rnE 'class[[:space:]]+[A-Za-z_]*(Mock|Fake|Stub|Synthetic|Dummy)[A-Za-z_]*(Provider|Driver)\b' src/ || true)"
+          if [ -n "$bad" ]; then
+            echo "::error::Shipping code must not define a synthetic/mock provider (no fallback theater):"
+            echo "$bad"
+            exit 1
+          fi
+          echo "OK: no synthetic provider in src/."
+
   test:
     name: Python tests and lint
     runs-on: ubuntu-latest
