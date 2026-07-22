@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Curator · 并行编排与任务记忆</title>
+  <link rel="stylesheet" href="assets/curator-docs.css" />
+</head>
+<body id="top">
+
+  <header class="masthead">
+    <a class="wordmark" href="#top"><span class="loop">↻</span><span class="name">Curator</span></a>
+    <span class="mast-spacer"></span>
+    <div class="phase-legend">
+      <span class="chip live">Live · Phase 0</span>
+      <span class="chip target">Target · V1</span>
+    </div>
+  </header>
+
+  <main class="page">
+    <div class="doc-head">
+      <span class="eyebrow">Design · Parallelism &amp; memory</span>
+      <h1>并行编排与任务记忆</h1>
+      <p class="dek">
+        Orca 的并行能力本质是"<em>worktree 隔离 + terminal dispatch + 协调消息</em>"，其记忆本质是
+        "<em>尊重 provider 仓库记忆 + 持久化运行协作状态</em>"。Curator 应借鉴前者的可操作性，但把后者
+        升级为<strong>有来源、有作用域、可过期、可验证的任务记忆</strong> —— 不把聊天记录或 agent
+        自述当作长期事实。
+      </p>
+    </div>
+
+    <div class="callout">
+      <strong>状态：</strong>提议，作为 Curator V1 并行编排与任务记忆的设计输入。
+      <div style="margin-top:10px">
+        <strong>两条设计判断</strong>
+        <ol>
+          <li>并行的基本隔离单位应是 <code>Workspace / Worktree</code>，而不是"共享目录中的多个 agent 进程"。</li>
+          <li>任务记忆的基本写入单位应是附带证据引用的 <code>TaskMemoryEntry</code>，而不是 transcript、自由文本 checkpoint 或模型总结。</li>
+        </ol>
+      </div>
+    </div>
+
+    <section class="sec" id="what">
+      <div class="sec-eyebrow"><span class="mark">W</span> What</div>
+      <h2>范围与事实来源</h2>
+      <p>
+        本文把 Orca 已公开的并行编排、worktree、checkpoint、hooks 和 memory 机制拆解为可复用 artifact，
+        并定义 Curator 应实现的最小模型、状态流、记忆规则、阶段计划和验收标准。它不把 Orca 的桌面 IDE 功能
+        当作前置条件，也不宣称 Curator 当前已具备并行、DAG 或远程运行时能力。
+      </p>
+      <ul>
+        <li>Orca 的公开文档说明其任务有 <code>Task</code>、<code>Dispatch</code>、持久消息、心跳和 decision gate；该编排层仍被标为 experimental。</li>
+        <li>Orca 以独立 git worktree 承载并行 agent；同一提示可以在多个 worktree 中竞赛，随后人工比较 diff 并选择结果。</li>
+        <li>Orca 对 memory 采取 provider-owned 策略：读取且不改写 <code>AGENTS.md</code> / <code>CLAUDE.md</code>；另外提供可持久化的 worktree checkpoint 与 hook endpoint。</li>
+        <li>Curator 当前已具备 SQLite ledger、单写入锁、验证证据、fresh-context reviewer、暂停/恢复和失败记忆；当前范围明确为顺序单写入者。</li>
+      </ul>
+    </section>
+
+    <section class="sec" id="how-orca">
+      <div class="sec-eyebrow"><span class="mark">H</span> How · Orca 的并行编排模型</div>
+      <h2>worktree 隔离 + dispatch + 协调</h2>
+      <figure class="figure">
+        <div class="mermaid">
+flowchart TB
+  Repo["Repository + base ref"]:::live
+  Repo --> WA["Worktree A"]:::target
+  Repo --> WB["Worktree B"]:::target
+  Repo --> WC["Worktree C"]:::target
+  WA --> TA["Terminal A · Agent A · Dispatch A"]:::review
+  WB --> TB["Terminal B · Agent B · Dispatch B"]:::review
+  WC --> TC["Terminal C · Agent C · Dispatch C"]:::review
+  TA --> G{"Task · dependency · decision gate"}:::gate
+  TB --> G
+  TC --> G
+  G --> M["持久消息 + heartbeat + checkpoint"]:::verify
+  M --> H["human diff review · choose · ship"]:::live
+  classDef live fill:#0e1a33,stroke:#3b8cff,stroke-width:1.5px,color:#eaf1ff;
+  classDef target fill:#140b22,stroke:#c77dff,stroke-width:1.5px,stroke-dasharray:5 4,color:#ecd9ff;
+  classDef review fill:#170f2e,stroke:#8b5cf6,stroke-width:1.5px,color:#ece3ff;
+  classDef verify fill:#0c2318,stroke:#43e2a4,stroke-width:1.5px,color:#d6ffe9;
+  classDef gate fill:#241a06,stroke:#ffc24b,stroke-width:1.5px,color:#ffe9bf;
+        </div>
+        <div class="figure-cap"><b>图 1.</b><span>Orca 的 fan-out：每个任务一个物理 worktree，协调靠持久消息而非终端观感。</span></div>
+      </figure>
+
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>Artifact</th><th>Orca 的职责</th><th>并行价值</th><th>Curator 采纳方式</th></tr></thead>
+          <tbody>
+            <tr><td><code>Worktree</code></td><td>一个任务对应一个物理 git worktree，并记录 base/start-from ref。</td><td>让多个 writer 不共享文件系统写入面；同题竞赛与独立子任务都可安全执行。</td><td>新增 <code>Workspace</code>，绑定 repo、base ref、branch、path、owner task 与生命周期；它是并行的唯一写入边界。</td></tr>
+            <tr><td><code>Task</code></td><td>拥有 spec、依赖和 <code>pending → ready → dispatched → completed/failed/blocked</code> 状态。</td><td>使 coordinator 不必依赖 terminal transcript 判断谁能开始。</td><td>把现有编译步骤迁移为持久 <code>Task</code> 与 <code>TaskDependency</code>；状态转换只允许 scheduler 执行。</td></tr>
+            <tr><td><code>Dispatch</code></td><td>把 Task 分配给一个 terminal；重试获得新的 dispatch context。</td><td>避免旧 worker 的迟到消息完成新的重试任务。</td><td>新增不可变 <code>Execution</code>；所有 heartbeat、完成声明、产物和失败都必须携带 <code>task_id + execution_id</code>。</td></tr>
+            <tr><td>消息与 heartbeat</td><td>持久化 status、dispatch、worker_done、escalation、decision_gate、heartbeat 等通信。</td><td>让 coordinator 能等待正确事件，而不是轮询所有终端。</td><td>新增 append-only <code>CoordinationEvent</code>，但消息只改变"观察状态"；真正完成仍需验证 evidence。</td></tr>
+            <tr><td>Decision gate</td><td>阻塞某个 Task，直到 coordinator 或人类记录决策。</td><td>把依赖于选择的问题从临时聊天移入可恢复状态。</td><td>复用并扩展当前 approval/pause 模型：gate 需要问题、选项、影响任务、决策者、有效期和可审计 resolution。</td></tr>
+            <tr><td>Diff review</td><td>比较各 worktree 的 diff，行级批注可批量发回 agent。</td><td>把"选择胜者"从主观 terminal 阅读变为可操作评审。</td><td>将 finding 作为带文件/行范围的 <code>ReviewFinding</code> evidence，并在定向 resume 时注入 writer context。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Orca 的有效交互模式</h3>
+      <ol>
+        <li><strong>Fan-out：</strong>同一任务在多个 worktree 竞赛，随后比较 diff。</li>
+        <li><strong>Decompose：</strong>coordinator 创建有依赖的 task，再向可用 terminal dispatch ready task。</li>
+        <li><strong>Escalate：</strong>worker 通过 coordinator 问题与 gate 获取阻塞决策，而不是卡在本地交互提示。</li>
+        <li><strong>Observe：</strong>工作中、等待输入、空闲等 agent 状态被呈现为全局可见的运行态，而非仅可从某个 terminal 猜测。</li>
+      </ol>
+
+      <div class="callout warn">
+        <strong>不能照搬的语义：</strong>Orca 的 <code>worker_done</code> 是协调协议中的完成通知，不等于可交付完成。Curator 必须保持"<code>worker_done</code> → 采集 artifact → deterministic validation → reviewer / human gate → scheduler transition"的顺序。
+      </div>
+    </section>
+
+    <section class="sec" id="how-memory">
+      <div class="sec-eyebrow"><span class="mark">H</span> How · Orca 的任务记忆分层</div>
+      <h2>三层并存的记忆机制</h2>
+      <p>Orca 没有公开一个统一的、证据化的 semantic task-memory 数据模型。它实际采用三层并存的记忆/上下文机制：</p>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>层</th><th>载体</th><th>所有者</th><th>适合存什么</th><th>局限</th></tr></thead>
+          <tbody>
+            <tr><td>Provider 指令记忆</td><td><code>AGENTS.md</code>、<code>CLAUDE.md</code> 与 provider 配置</td><td>用户 / agent provider</td><td>仓库约束、编码约定、执行指令。</td><td>不是 task-specific 事实；缺少执行 provenance；不应由编排器静默改写。</td></tr>
+            <tr><td>运行协作记忆</td><td>Task、Dispatch、消息、heartbeat、gate、session restore</td><td>Orca runtime</td><td>谁在做什么、当前阻塞、派发版本、待决问题。</td><td>主要是操作状态，并不自动证明结论或代码质量。</td></tr>
+            <tr><td>工作区摘要记忆</td><td>worktree checkpoint / comment</td><td>人和 agent 协作</td><td>当前进展、最近发现、下一步。</td><td>自由文本可过期、可覆盖；必须先读后写，仍不宜作为长期事实来源。</td></tr>
+            <tr><td>自动化连续上下文</td><td>可复用的 automation session</td><td>Orca runtime</td><td>周期性工作中的短期会话连续性。</td><td>会话连续不等于可靠的项目记忆；应可切换为 fresh session。</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p><strong>对 Curator 的关键启发：</strong>尊重 provider-owned memory，但不要把它误认为 Curator memory。Curator 应读取并打包 <code>AGENTS.md</code> / <code>CLAUDE.md</code> 等外部指令，记录其内容 hash 和读取范围；这些文件保持用户/agent 所有。Curator 自己维护的任务记忆必须独立、可查证、可撤销。</p>
+    </section>
+
+    <section class="sec" id="how-target">
+      <div class="sec-eyebrow"><span class="mark">H</span> How · Curator 的目标 Artifact 模型</div>
+      <h2>把并行升级为可回放链</h2>
+      <figure class="figure">
+        <div class="mermaid">
+flowchart TB
+  Goal["Goal"]:::live --> DAG["Task DAG"]:::target
+  DAG --> Task["Task + dependencies + acceptance criteria"]:::target
+  Task --> WS["Workspace<br/><small>exclusive worktree ownership</small>"]:::target
+  Task --> Ex["Execution<br/><small>immutable dispatch attempt</small>"]:::target
+  Ex --> CE["CoordinationEvent / heartbeat / checkpoint"]:::review
+  Ex --> Ar["ArtifactRef<br/><small>diff · test log · screenshot</small>"]:::verify
+  Ex --> Ev["EvidenceRef<br/><small>hash + producer + validator</small>"]:::verify
+  Ex --> RF["ReviewFinding"]:::gate
+  Ex --> TM["TaskMemoryEntry<br/><small>derived · scoped · expirable</small>"]:::ledger
+  TM --> Dec{"scheduler decision · approval · resume"}:::gate
+  classDef live fill:#0e1a33,stroke:#3b8cff,stroke-width:1.5px,color:#eaf1ff;
+  classDef target fill:#140b22,stroke:#c77dff,stroke-width:1.5px,stroke-dasharray:5 4,color:#ecd9ff;
+  classDef review fill:#170f2e,stroke:#8b5cf6,stroke-width:1.5px,color:#ece3ff;
+  classDef verify fill:#0c2318,stroke:#43e2a4,stroke-width:1.5px,color:#d6ffe9;
+  classDef gate fill:#241a06,stroke:#ffc24b,stroke-width:1.5px,color:#ffe9bf;
+  classDef ledger fill:#0a0f1f,stroke:#33406a,stroke-width:1.4px,color:#9fb0d6;
+        </div>
+        <div class="figure-cap"><b>图 2.</b><span>目标模型：worktree ownership、Execution 身份、证据与记忆合并成一条可回放链。</span></div>
+      </figure>
+
+      <h3>当前本体成熟度：Phase 0 → V1</h3>
+      <p>Curator 当前已是 <strong>ontology-aware</strong> 的 Phase 0：拥有 Goal、Session、Loop、Task、Role、Provider Run、Evidence、Decision、Pause 和 Memory 等实体。当前运行时仍是顺序单写入者，而非完整的并行 Agent Runtime Ontology。</p>
+      <figure class="figure">
+        <div class="mermaid">
+flowchart LR
+  subgraph P0["当前 Phase 0"]
+    direction LR
+    g1["Goal"]:::live --> s1["Session / Loop"]:::live --> t1["Task / Iteration"]:::live --> r1["Role"]:::live --> pr1["Provider Run"]:::live --> e1["Evidence / Decision / Pause / Memory"]:::verify
+  end
+  subgraph V1T["目标 V1"]
+    direction LR
+    a2["Agent"]:::target --> ar2["AgentRuntime"]:::target --> ex2["Execution"]:::target --> w2["Workspace / Artifact / Evidence / TaskMemory"]:::target --> dag2["Task DAG / CapabilityGrant / DecisionGate"]:::target
+  end
+  P0 -.->|migrate| V1T
+  classDef live fill:#0e1a33,stroke:#3b8cff,stroke-width:1.5px,color:#eaf1ff;
+  classDef target fill:#140b22,stroke:#c77dff,stroke-width:1.5px,stroke-dasharray:5 4,color:#ecd9ff;
+  classDef verify fill:#0c2318,stroke:#43e2a4,stroke-width:1.5px,color:#d6ffe9;
+        </div>
+        <div class="figure-cap"><b>图 3.</b><span>顺序单写入本体迁移到并行 Agent Runtime 本体。</span></div>
+      </figure>
+
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>本体边界</th><th>当前 Phase 0</th><th>V1 必需补足</th></tr></thead>
+          <tbody>
+            <tr><td>Agent 身份</td><td>Role slot、provider profile 与一次 provider run 已有，但语义仍部分重叠。</td><td>明确 <code>Agent</code>、<code>AgentRuntime</code> 与 <code>Execution</code>。</td></tr>
+            <tr><td>任务关系</td><td>编译后的顺序步骤可执行，但没有持久 dependency graph。</td><td><code>TaskDependency</code>、ready queue、task ownership、冲突检测与 bounded concurrency。</td></tr>
+            <tr><td>执行身份</td><td>Provider run 保存了调用结果，但没有完整的 runtime/process/workspace 归属。</td><td>每次 dispatch 或 retry 新建不可变 <code>Execution</code>；旧 execution 只读保留。</td></tr>
+            <tr><td>写入边界</td><td>通过 clean baseline 与 project lock 保护单一项目目录。</td><td><code>Workspace</code>/<code>Worktree</code> 实体、独占 lease、base ref、branch、资源冲突规则。</td></tr>
+            <tr><td>证据与记忆</td><td>已有 evidence ref，以及针对 retry/failure/pause 的 memory distillation。</td><td>一等 <code>ArtifactRef</code>、<code>ReviewFinding</code>、<code>TaskMemoryEntry</code>，并加入 provenance、scope、confidence、TTL、supersedes。</td></tr>
+            <tr><td>权限与能力</td><td>已有 action policy 和 approval request。</td><td><code>CapabilityGrant</code> 显式绑定 provider/runtime/execution 与各类访问范围。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout">
+        <strong>三层边界不可混淆：</strong><code>Agent</code> 是可选择的工作主体及其能力；<code>AgentRuntime</code> 是存活的 provider 进程/终端实体；<code>Execution</code> 是某个 Task 的一次不可变尝试。同一 provider 可支撑多个 runtime，同一 runtime 可发生多个 execution；失败重试必须产生新的 execution，而不能覆盖旧记录。
+      </div>
+
+      <h3>新增 Artifact 的字段与规则</h3>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>新 Artifact</th><th>最小字段</th><th>写入规则</th><th>读取规则</th></tr></thead>
+          <tbody>
+            <tr><td><code>Workspace</code></td><td>id、repo、base_ref、branch、path、owner_task_id、status、lease</td><td>scheduler 创建；一个可写 Task 只持有一个独占 workspace。</td><td>worker 只获得其 workspace；reviewer 默认只读。</td></tr>
+            <tr><td><code>Execution</code></td><td>id、task_id、attempt、provider/profile、workspace_id、started/stopped、reason</td><td>每次 dispatch/retry 新建，不覆盖旧 execution。</td><td>所有事件、产物和 memory 必须可回溯到 execution。</td></tr>
+            <tr><td><code>TaskCheckpoint</code></td><td>task_id、execution_id、phase、summary、blocker、next_step、supersedes</td><td>agent 或人可提议；系统保存不可变版本并标记当前版本。</td><td>仅用于运行观察和短期 context，不能单独导致任务完成。</td></tr>
+            <tr><td><code>TaskMemoryEntry</code></td><td>scope、kind、claim、evidence_refs、confidence、ttl、status、created_by</td><td>由 verifier/reviewer/scheduler 生成，或由 agent 提议后经验证/审批写入。</td><td>按 project/task/component/provider scope 和有效期检索；必须显示来源。</td></tr>
+            <tr><td><code>ReviewFinding</code></td><td>artifact_id、path、line range、severity、comment、status、resolution_evidence</td><td>人或 reviewer 产生；不可静默丢弃。</td><td>下一次 targeted resume 只注入未解决 finding 与关联 evidence。</td></tr>
+            <tr><td><code>DecisionGate</code></td><td>question、options、affected_tasks、owner、resolution、expiry</td><td>scheduler/coordinator 创建，授权人解决。</td><td>只释放受影响的 ready task；resolution 进入 evidence-linked memory。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>任务记忆分类与策略</h3>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>Kind</th><th>例子</th><th>证据门槛</th><th>默认 TTL</th><th>可注入到</th></tr></thead>
+          <tbody>
+            <tr><td><code>constraint</code></td><td>"该 API 必须保持 v1 兼容"</td><td>用户决策、合同或明确源文件</td><td>永久，直到废止</td><td>所有相关 task</td></tr>
+            <tr><td><code>validated_fact</code></td><td>"测试 X 在 commit Y 失败，原因是 Z"</td><td>哈希化 test log / diff / review evidence</td><td>直到关联 artifact 失效</td><td>依赖 task、retry、reviewer</td></tr>
+            <tr><td><code>failure_lesson</code></td><td>"迁移必须先执行 schema step"</td><td>失败 execution + 验证证据</td><td>30 天或人工提升</td><td>同 repo / component</td></tr>
+            <tr><td><code>decision</code></td><td>"选择 shared button 方案"</td><td>resolved gate / human approval</td><td>永久，直到 superseded</td><td>相关 DAG 分支</td></tr>
+            <tr><td><code>hypothesis</code></td><td>"怀疑问题来自缓存键"</td><td>可无，但必须标记未验证</td><td>单 execution</td><td>当前 investigation</td></tr>
+            <tr><td><code>checkpoint</code></td><td>"已复现；正在验证修复"</td><td>无；运行态自述</td><td>单 task / superseded</td><td>control desk 与 handoff</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>记忆不变量</h3>
+      <ol>
+        <li><strong>不把 transcript 当 memory。</strong>原始输出是 artifact；摘要只是引用 artifact 的派生对象。</li>
+        <li><strong>不让 worker 自证完成。</strong><code>worker_done</code>、checkpoint 与 hypothesis 只能触发后续验证。</li>
+        <li><strong>每条长期记忆可追溯。</strong>必须能打开 source execution、artifact hash、decision 或 human approver。</li>
+        <li><strong>记忆有作用域与淘汰策略。</strong>Task 级总结不得自动污染 Project 级知识；低置信度与失败假设会过期。</li>
+        <li><strong>外部记忆文件不被静默修改。</strong><code>AGENTS.md</code> / <code>CLAUDE.md</code> 是 provider-owned；Curator 只记录读取版本，修改必须走显式 proposal 与 approval。</li>
+      </ol>
+    </section>
+
+    <section class="sec" id="why">
+      <div class="sec-eyebrow"><span class="mark">Y</span> Why</div>
+      <h2>worktree 之外还需语义与证据</h2>
+      <p>仅使用 worktree 可以避免文件冲突，却不能避免语义冲突：两个 task 可能修改同一个 API，或在错误假设上平行推进。仅使用 agent chat 可以快速协作，却不能恢复、验证或解释决策。把 worktree ownership、Task/Execution 身份、证据与记忆合并成一条可回放链，才能让并行提高吞吐而不降低交付可信度。</p>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>借鉴</th><th>如何改造成 Curator 优势</th></tr></thead>
+          <tbody>
+            <tr><td>独立 worktree 并行</td><td>为每个写任务建立可审计 ownership、base ref 和 lease；合并前必须执行组合验证。</td></tr>
+            <tr><td>Task / Dispatch / heartbeat</td><td>保留交互协议，但所有最终状态由 scheduler 与 evidence 决定，而非消息决定。</td></tr>
+            <tr><td>checkpoint</td><td>将自由文本提升为可版本化的 TaskCheckpoint，显式标记 superseded 与关联 execution。</td></tr>
+            <tr><td>provider memory files</td><td>只读纳入 context package，并记录 hash；Curator 的长期 memory 与 provider 指令分开管理。</td></tr>
+            <tr><td>agent race + diff selection</td><td>把候选 diff、验证结果、review findings 统一成可比较 evidence pack，而不是凭终端观感选胜者。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="sec" id="future">
+      <div class="sec-eyebrow"><span class="mark">F</span> Future · considerations · trade-offs</div>
+      <h2>建议实施顺序</h2>
+      <ol>
+        <li><strong>V1.1 Canonical artifacts：</strong>新增 Task、Dependency、Workspace、Execution、ArtifactRef 和 append-only CoordinationEvent；先提供 Phase 0 ledger 的只读映射。</li>
+        <li><strong>V1.2 Worktree adapter：</strong>实现 create/inspect/archive worktree、clean baseline、base-ref pinning、独占 lease 和 crash reconciliation；此时仍只允许一个 writer。</li>
+        <li><strong>V1.3 Ready queue：</strong>仅调度无依赖且 workspace 不冲突的 task；上线 bounded concurrency，初始上限为 2，稳定后才提高到 4。</li>
+        <li><strong>V1.4 Evidence-backed task memory：</strong>实现 TaskCheckpoint、TaskMemoryEntry、ReviewFinding、provenance/TTL/retrieval；把现有 retry/failure/pause memory 迁移为该模型。</li>
+        <li><strong>V1.5 Control Desk：</strong>展示 DAG、workspace、execution、heartbeat、blocker、evidence、memory 与 gate；再考虑 provider-native TUI attach、通知和远程 runtime。</li>
+      </ol>
+
+      <h3>MVP 验收标准</h3>
+      <ul>
+        <li>两个独立 task 可在独立 worktree 中并行运行；同一路径或声明共享资源的 task 不会同时获得写 lease。</li>
+        <li>worker crash、app restart、lease 过期后，旧 Execution 不会继续写入；恢复会创建新的 Execution 并保留历史。</li>
+        <li>迟到的 <code>worker_done</code> 无法完成新的 retry attempt。</li>
+        <li>Task 只有在要求的 validation evidence、review 状态与必要 gate 都满足后才能进入 <code>DONE</code>。</li>
+        <li>每条 <code>validated_fact</code> 与 <code>decision</code> memory 都能定位到 source artifact/decision；过期或 superseded memory 不进入默认 context package。</li>
+        <li>任意 provider-owned 指令文件的写入均要求显式 approval，并在 ledger 中有 before/after hash。</li>
+      </ul>
+
+      <h3>明确延后</h3>
+      <ul>
+        <li>完整 Electron IDE、无限终端分屏、Monaco 编辑器和移动端不是并行 scheduler 的前置条件。</li>
+        <li>SSH/远程 runtime 应在 lease、process identity、recovery、密钥与网络权限模型稳定后再实现。</li>
+        <li>不要以"支持任意 CLI agent"为近期目标；优先完成 capability probe、profile contract 和安全策略矩阵。</li>
+        <li>不要自动把 agent reflection 写入长期 memory；应先生成 proposal，再由 evidence 或人类审批提升其作用域。</li>
+      </ul>
+    </section>
+
+    <section class="sec" id="refs">
+      <div class="sec-eyebrow"><span class="mark">R</span> 参考资料</div>
+      <ul>
+        <li><a href="https://www.onorca.dev/docs/cli/orchestration">Orca Orchestration</a>：Task、Dispatch、消息、heartbeat、gate 与 coordinator loop。</li>
+        <li><a href="https://www.onorca.dev/docs/model/worktrees">Orca Worktrees</a>：以 worktree 作为并行隔离边界。</li>
+        <li><a href="https://www.onorca.dev/docs/first-session">Orca first 3-agent session</a>：同题多 worktree 竞赛、diff 选择与交付流程。</li>
+        <li><a href="https://www.onorca.dev/docs/agents/hooks-memory">Orca Agent hooks &amp; memory</a>：provider-owned memory files、repo hooks 与可恢复 endpoint。</li>
+        <li><a href="https://www.onorca.dev/docs/cli/worktree-checkpoints">Orca Worktree checkpoints</a>：短期协作状态摘要。</li>
+        <li><a href="v0-alpha-release-plan-v3.html">Curator V1 migration plan</a>：canonical model、runtime registry、DAG 与 bounded worker 路线。</li>
+        <li><a href="future-optimizations.html">Curator future optimizations</a>：evidence-driven runtime、memory 与并行的设计约束。</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="doc-foot">
+    <div class="foot-eyebrow">Curator documentation</div>
+    <nav class="doc-index">
+      <a href="orchestration.html"><span class="di-title">Orchestration &amp; runtime boundary</span><span class="di-desc">The Phase 0 control loop and the V1 blueprint boundary.</span></a>
+      <a href="provider-profile-layer.html"><span class="di-title">Provider &amp; runtime identity</span><span class="di-desc">Agent, Provider, AgentRuntime, and Execution.</span></a>
+      <a href="runtime-workspace-ui.html"><span class="di-title">Runtime workspace UI</span><span class="di-desc">The workbench today, the Control Desk target.</span></a>
+      <a href="shell-adapter-boundary.html"><span class="di-title">Shell adapter boundary</span><span class="di-desc">What shell may do vs the Python control plane.</span></a>
+      <a href="future-optimizations.html"><span class="di-title">Future optimizations</span><span class="di-desc">The evidence-driven runtime kernel backlog.</span></a>
+      <a href="v0-alpha-release-plan-v3.html"><span class="di-title">v0.1.0 release plan (v3)</span><span class="di-desc">Release gates and the V1.1–V1.6 ladder.</span></a>
+      <a href="v0-alpha-implementation-status.html"><span class="di-title">Implementation status</span><span class="di-desc">What PR1–PR5 actually landed.</span></a>
+      <a href="release-notes-v0.1.0.html"><span class="di-title">v0.1.0 release notes</span><span class="di-desc">What ships, and the known limits.</span></a>
+      <a class="current" href="orca-parallel-orchestration-and-task-memory.html"><span class="di-title">Parallel orchestration &amp; task memory</span><span class="di-desc">Orca's parallelism as evidence-backed state.</span></a>
+    </nav>
+    <div class="foot-meta"><span class="chip live">Phase 0</span> local · single-writer · sequential — the V1 blueprint is a migration target, not current capability.</div>
+  </footer>
+
+  <script src="assets/mermaid.min.js"></script>
+  <script src="assets/curator-mermaid.js"></script>
+</body>
+</html>

@@ -1,89 +1,134 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Provider, Agent, and Runtime Identity</title>
-    <style>
-      body {
-        color: #1f2937;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        line-height: 1.55;
-        margin: 0 auto;
-        max-width: 880px;
-        padding: 32px 20px 48px;
-      }
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Curator · Provider, Agent & Runtime Identity</title>
+  <link rel="stylesheet" href="assets/curator-docs.css" />
+</head>
+<body id="top">
 
-      code {
-        background: #f3f4f6;
-        border-radius: 4px;
-        padding: 2px 4px;
-      }
+  <header class="masthead">
+    <a class="wordmark" href="#top"><span class="loop">↻</span><span class="name">Curator</span></a>
+    <span class="mast-spacer"></span>
+    <div class="phase-legend">
+      <span class="chip live">Live · Phase 0</span>
+      <span class="chip target">Target · V1</span>
+    </div>
+  </header>
 
-      pre {
-        background: #111827;
-        border-radius: 8px;
-        color: #f9fafb;
-        overflow-x: auto;
-        padding: 16px;
-      }
-    </style>
-  </head>
-  <body>
-    <h1>Provider, Agent, and Runtime Identity</h1>
+  <main class="page">
+    <div class="doc-head">
+      <span class="eyebrow">Runtime · Identity</span>
+      <h1>Provider, Agent &amp; Runtime identity</h1>
+      <p class="dek">
+        Account identity, capability availability, a live process, and a task attempt are
+        four different things. Curator keeps them separate so a runtime can be switched or
+        recovered <strong>without changing the task's execution identity</strong> — and so the
+        audit trail of provider and capability use stays complete.
+      </p>
+    </div>
 
-    <h2>What</h2>
-    <p>
-      Phase 0 separates role slots such as <code>writer.default</code> from provider
-      profiles such as <code>codex-work</code> or <code>claude-team</code>. The blueprint
-      makes this boundary explicit with four identities: an <code>Agent</code> is a
-      configured role worker, a <code>Provider</code> is an installed/backend identity,
-      an <code>AgentRuntime</code> is one live process or provider TUI session, and an
-      <code>Execution</code> is the durable task attempt that survives runtime handoff.
-    </p>
+    <figure class="figure">
+      <div class="mermaid">
+flowchart LR
+  A["Agent<br/><small>role worker + capability</small><br/><small>writer.default · reviewer.default</small>"]:::live
+  P["Provider<br/><small>installed backend identity</small><br/><small>codex-work · claude-team</small>"]:::live
+  RT["AgentRuntime<br/><small>one live process / TUI</small><br/><small>lease · heartbeat</small>"]:::target
+  EX["Execution<br/><small>durable task attempt</small><br/><small>survives handoff</small>"]:::target
+  A -- "binds" --> P -- "backs" --> RT -- "runs" --> EX
+  classDef live fill:#0e1a33,stroke:#3b8cff,stroke-width:1.5px,color:#eaf1ff;
+  classDef target fill:#140b22,stroke:#c77dff,stroke-width:1.5px,stroke-dasharray:5 4,color:#ecd9ff;
+      </div>
+      <div class="figure-cap"><b>Figure 1.</b><span>The identity chain. Solid = Phase 0 today; dashed = V1 target separation.</span></div>
+      <div class="figure-legend">
+        <span class="leg"><span class="swatch" style="background:rgba(59,140,255,0.5);border:1px solid #3b8cff"></span>exists in Phase 0</span>
+        <span class="leg"><span class="swatch" style="border:1.5px dashed #c77dff;background:transparent"></span>V1 target</span>
+      </div>
+    </figure>
 
-    <h2>How</h2>
-    <p>
-      Provider profiles are stored in SQLite with a non-secret
-      <code>credential_ref</code>. Phase 0 role slots bind to profiles through
-      <code>role_provider_bindings</code>. The target migration adds provider status,
-      capability/version detection, installation records, scoped permissions, runtime
-      handles, heartbeats, and execution-runtime history without exposing credentials
-      in prompts, logs, or shared memory.
-    </p>
-    <pre><code>/providers
+    <section class="sec" id="what">
+      <div class="sec-eyebrow"><span class="mark">W</span> What</div>
+      <h2>Slots are not profiles</h2>
+      <p>
+        Phase 0 separates role slots such as <code>writer.default</code> from provider
+        profiles such as <code>codex-work</code> or <code>claude-team</code>. The blueprint
+        makes this boundary explicit with four identities: an <code>Agent</code> is a
+        configured role worker, a <code>Provider</code> is an installed backend identity, an
+        <code>AgentRuntime</code> is one live process or provider TUI session, and an
+        <code>Execution</code> is the durable task attempt that survives runtime handoff.
+      </p>
+    </section>
+
+    <section class="sec" id="how">
+      <div class="sec-eyebrow"><span class="mark">H</span> How</div>
+      <h2>Binding and attribution today</h2>
+      <p>
+        Provider profiles are stored in SQLite with a non-secret <code>credential_ref</code>.
+        Phase 0 role slots bind to profiles through <code>role_provider_bindings</code>. The
+        target migration adds provider status, capability/version detection, installation
+        records, scoped permissions, runtime handles, heartbeats, and execution-runtime
+        history — without exposing credentials in prompts, logs, or shared memory.
+      </p>
+      <pre><code>/providers
 /agent bind writer.default codex-work
 /agent switch writer.default claude-team</code></pre>
-    <p>
-      The runtime workbench renders provider profile status, latest quota state, and
-      active slot bindings. The scheduler requires real provider drivers for user work,
-      and provider objects expose <code>provider_name</code>,
-      <code>provider_profile_id</code>, and <code>provider_session_id</code> for ledger
-      attribution. These are Phase 0 compatibility fields, not the complete target
-      runtime registry.
-    </p>
-    <p>
-      Current CLI commands render and switch existing provider profile records.
-      Dedicated profile creation, credential setup, automatic quota refresh, and
-      provider-specific session bootstrapping are intentionally not user-facing
-      flows yet.
-    </p>
+      <p>
+        The runtime workbench renders provider profile status, latest quota state, and active
+        slot bindings. The scheduler requires real provider drivers for user work, and
+        provider objects expose <code>provider_name</code>, <code>provider_profile_id</code>,
+        and <code>provider_session_id</code> for ledger attribution. These are Phase 0
+        compatibility fields, not the complete target runtime registry.
+      </p>
+      <div class="callout">
+        <strong>Not yet user-facing:</strong> current CLI commands render and switch existing
+        provider profile records. Dedicated profile creation, credential setup, automatic
+        quota refresh, and provider-specific session bootstrapping are intentionally not
+        exposed flows yet.
+      </div>
+    </section>
 
-    <h2>Why</h2>
-    <p>
-      Account identity, capability availability, live process identity, and task
-      business identity are different concerns. Keeping them separate lets the
-      scheduler switch or recover a runtime without changing the task's execution
-      identity, while preserving a complete audit trail of provider and capability use.
-    </p>
+    <section class="sec" id="why">
+      <div class="sec-eyebrow"><span class="mark">Y</span> Why</div>
+      <h2>Separable concerns, recoverable runtimes</h2>
+      <p>
+        Account identity, capability availability, live process identity, and task business
+        identity are different concerns. Keeping them separate lets the scheduler switch or
+        recover a runtime without changing the task's execution identity, while preserving a
+        complete audit trail of provider and capability use.
+      </p>
+    </section>
 
-    <h2>Future improvements/considerations/trade-offs</h2>
-    <p>
-      This version intentionally avoids storing raw credentials and does not call
-      external quota APIs. Future work can add Provider Adapter contracts, capability
-      installation/status, Keychain-backed credentials, native TUI/tmux runtimes,
-      heartbeat-based health, and scheduler-level reassignment when a provider or
-      capability is unavailable.
-    </p>
-  </body>
+    <section class="sec" id="future">
+      <div class="sec-eyebrow"><span class="mark">F</span> Future · considerations · trade-offs</div>
+      <h2>What stays out of scope for now</h2>
+      <p>
+        This version intentionally avoids storing raw credentials and does not call external
+        quota APIs. Future work can add Provider Adapter contracts, capability
+        installation/status, Keychain-backed credentials, native TUI/tmux runtimes,
+        heartbeat-based health, and scheduler-level reassignment when a provider or capability
+        is unavailable.
+      </p>
+    </section>
+  </main>
+
+  <footer class="doc-foot">
+    <div class="foot-eyebrow">Curator documentation</div>
+    <nav class="doc-index">
+      <a href="orchestration.html"><span class="di-title">Orchestration &amp; runtime boundary</span><span class="di-desc">The Phase 0 control loop and the V1 blueprint boundary.</span></a>
+      <a class="current" href="provider-profile-layer.html"><span class="di-title">Provider &amp; runtime identity</span><span class="di-desc">Agent, Provider, AgentRuntime, and Execution.</span></a>
+      <a href="runtime-workspace-ui.html"><span class="di-title">Runtime workspace UI</span><span class="di-desc">The workbench today, the Control Desk target.</span></a>
+      <a href="shell-adapter-boundary.html"><span class="di-title">Shell adapter boundary</span><span class="di-desc">What shell may do vs the Python control plane.</span></a>
+      <a href="future-optimizations.html"><span class="di-title">Future optimizations</span><span class="di-desc">The evidence-driven runtime kernel backlog.</span></a>
+      <a href="v0-alpha-release-plan-v3.html"><span class="di-title">v0.1.0 release plan (v3)</span><span class="di-desc">Release gates and the V1.1–V1.6 ladder.</span></a>
+      <a href="v0-alpha-implementation-status.html"><span class="di-title">Implementation status</span><span class="di-desc">What PR1–PR5 actually landed.</span></a>
+      <a href="release-notes-v0.1.0.html"><span class="di-title">v0.1.0 release notes</span><span class="di-desc">What ships, and the known limits.</span></a>
+      <a href="orca-parallel-orchestration-and-task-memory.html"><span class="di-title">Parallel orchestration &amp; task memory</span><span class="di-desc">Orca's parallelism as evidence-backed state.</span></a>
+    </nav>
+    <div class="foot-meta"><span class="chip live">Phase 0</span> local · single-writer · sequential — the V1 blueprint is a migration target, not current capability.</div>
+  </footer>
+
+  <script src="assets/mermaid.min.js"></script>
+  <script src="assets/curator-mermaid.js"></script>
+</body>
 </html>
