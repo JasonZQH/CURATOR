@@ -24,6 +24,12 @@ from curator.providers.events import (
 
 DEFAULT_RUN_TIMEOUT_SECONDS = 1800
 _TERMINATE_GRACE_SECONDS = 5
+# asyncio's StreamReader defaults to a 64 KiB line limit; a single provider JSONL event
+# (a large diff, tool output, or a review that inlines the change) routinely exceeds that,
+# and readline() then raises ValueError("Separator is not found, and chunk exceeds the
+# limit"), failing the run as a bogus "invalid output". Give the reader generous headroom
+# so a big-but-ordinary line streams through instead of crashing the provider run.
+_STREAM_READER_LIMIT = 16 * 1024 * 1024
 
 
 class ProviderDriver(Protocol):
@@ -186,6 +192,7 @@ class SubprocessDriver:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             start_new_session=True,
+            limit=_STREAM_READER_LIMIT,
         )
         events: list[ProviderEvent] = []
         sequence = 0
