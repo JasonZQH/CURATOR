@@ -17,7 +17,7 @@ maintainer can invite you.
 
 ## Branching model
 
-- **`dev`** — the default, integration branch. All work lands here first, via pull request.
+- **`dev`** — the integration branch. All work lands here first, via pull request. (Recommended: set it as the repository's default branch so PRs target it automatically.)
 - **`main`** — protected and release-tagged. Only an admin merges `dev` → `main`, and only as
   a version bump. Never commit to `main` directly.
 - Feature/fix branches: `feat/<short-name>`, `fix/<short-name>`, `docs/<short-name>`,
