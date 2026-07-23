@@ -1,0 +1,5 @@
+# Code owners for Curator.
+# Every pull request requires review from an owner listed here.
+# Pairs with branch protection: "Require review from Code Owners" on dev and main.
+
+*       @JasonZQH
