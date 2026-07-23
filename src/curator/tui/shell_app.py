@@ -14,7 +14,7 @@ from textual.widgets.option_list import Option
 
 from curator.core.paths import build_curator_paths
 from curator.diagnostics.preflight import run_preflight
-from curator.providers.events import ProviderEvent
+from curator.providers.events import ProviderEvent, ProviderEventKind
 from curator.scheduler.recovery import reconcile_project
 from curator import __version__
 from curator.shell.banner import ASCII_BANNER, SLOGAN, WHATS_NEW, git_branch
@@ -61,6 +61,23 @@ def _fmt_tokens(count: int) -> str:
     if count >= 1_000:
         return f"{count / 1_000:.1f}k"
     return str(count)
+
+
+# Streamed tool calls collapse into a single live block above the input (Claude Code's
+# "⏺ tool(arg)" pattern): consecutive same-type calls stream a count + latest command there,
+# and only a concise one-line summary lands in the scrollback transcript when the group ends.
+_TOOL_GLYPH = "⏺"
+_TOOL_ACCENT = "#ffc24b"
+_TOOL_DIM = "#7e8bad"
+_TOOL_DETAIL_CHARS = 68
+
+
+def _one_line(text: str, limit: int = _TOOL_DETAIL_CHARS) -> str:
+    """Collapse whitespace to a single line and truncate with an ellipsis."""
+    collapsed = " ".join(text.split())
+    if len(collapsed) <= limit:
+        return collapsed
+    return collapsed[: limit - 1].rstrip() + "…"
 # Bound the plain-text transcript mirror so a long streamed run cannot grow it without
 # limit (the on-screen log is already capped); mirrors the _history[-100:] cap.
 _MAX_TRANSCRIPT_ENTRIES = 2000
@@ -86,6 +103,7 @@ class CuratorShellApp(App[None]):
     #palette:focus { border: none; }
     #palette > .option-list--option { padding: 0 1; }
     #palette > .option-list--option-highlighted { color: #eaf1ff; background: #24306a; text-style: bold; }
+    #activity { height: auto; padding: 0 1; background: transparent; display: none; }
     #hints { height: auto; padding: 0 1; color: $text-muted; background: transparent; }
     #status { height: 1; padding: 0 1; background: transparent; color: $text-muted; }
     #composer { height: 3; margin: 0 1; padding: 0 1; background: transparent; border: round #2c3a6e; }
@@ -122,6 +140,9 @@ class CuratorShellApp(App[None]):
         self._palette_matches: list[str] = []
         self._run_provider: str | None = None
         self._provider_tokens: dict[str, int] = {}
+        self._tool_group_type: str | None = None
+        self._tool_group_count = 0
+        self._tool_group_detail = ""
         self._menu: MenuSpec | None = None
         self._menu_index = 0
         self._trust_required = _should_check_trust()
@@ -135,6 +156,7 @@ class CuratorShellApp(App[None]):
             yield Static("", id="menu-title")
             yield OptionList(id="selection")
             yield SlashPalette(id="palette")
+            yield Static("", id="activity")
             yield Static("", id="hints")
             with Horizontal(id="composer"):
                 yield Static("›", id="prompt-caret")
@@ -296,7 +318,11 @@ class CuratorShellApp(App[None]):
         self.call_from_thread(self._on_provider_event, event)
 
     def _on_provider_event(self, event: ProviderEvent) -> None:
-        """Record provider/token attribution on the UI thread, then write the line."""
+        """Record provider/token attribution on the UI thread, then render the event.
+
+        Tool calls stream into one coalesced live block above the input; every other event
+        first closes any open tool group (committing its summary) and writes to the log.
+        """
         provider = event.payload.get("provider")
         if isinstance(provider, str) and provider:
             self._run_provider = provider
@@ -305,7 +331,59 @@ class CuratorShellApp(App[None]):
             self._provider_tokens[self._run_provider] = (
                 self._provider_tokens.get(self._run_provider, 0) + tokens
             )
+        if event.kind is ProviderEventKind.TOOL_CALL:
+            self._note_tool_call(event)
+            return
+        self._flush_tool_group()
         self._write(render_provider_event(event), True)
+
+    def _note_tool_call(self, event: ProviderEvent) -> None:
+        """Fold one tool call into the live activity block, coalescing same-type calls."""
+        label = event.label or "tool"
+        detail = str(event.payload.get("detail", "")).strip()
+        if self._tool_group_type == label:
+            self._tool_group_count += 1
+            if detail:
+                self._tool_group_detail = detail
+        else:
+            self._flush_tool_group()
+            self._tool_group_type = label
+            self._tool_group_count = 1
+            self._tool_group_detail = detail
+        self._render_tool_activity()
+
+    def _render_tool_activity(self) -> None:
+        """Update the live activity block for the current tool group (hidden when none)."""
+        activity = self.query_one("#activity", Static)
+        if self._tool_group_type is None:
+            activity.update("")
+            activity.styles.display = "none"
+            return
+        count = f" [{_TOOL_DIM}]×{self._tool_group_count}[/]" if self._tool_group_count > 1 else ""
+        detail = _one_line(self._tool_group_detail)
+        detail_part = f"  [{_TOOL_DIM}]{escape_markup(detail)}[/]" if detail else ""
+        activity.update(
+            f"[{_TOOL_ACCENT}]{_TOOL_GLYPH} {escape_markup(self._tool_group_type)}[/]"
+            f"{count}{detail_part}"
+        )
+        activity.styles.display = "block"
+
+    def _flush_tool_group(self) -> None:
+        """Commit the current tool group to the transcript as one concise line, then clear."""
+        if self._tool_group_type is None:
+            return
+        label, count, detail = self._tool_group_type, self._tool_group_count, self._tool_group_detail
+        self._tool_group_type = None
+        self._tool_group_count = 0
+        self._tool_group_detail = ""
+        head = f"[{_TOOL_ACCENT}]{_TOOL_GLYPH} {escape_markup(label)}[/]"
+        if count > 1:
+            summary = f"{head} [{_TOOL_DIM}]· {count} calls[/]"
+        else:
+            trimmed = _one_line(detail)
+            summary = f"{head}  [{_TOOL_DIM}]{escape_markup(trimmed)}[/]" if trimmed else head
+        self._write(summary, True)
+        self._render_tool_activity()
 
     def _status_text(self) -> str:
         """Build the persistent footer from durable mode and seat bindings."""
@@ -541,6 +619,7 @@ class CuratorShellApp(App[None]):
         self._spinner_index = 0
         self._run_provider = None
         self._provider_tokens = {}
+        self._flush_tool_group()
         self.query_one("#input", Input).disabled = True
         self.query_one("#hints", Static).update(self._working_line())
         self.run_worker(lambda: self._dispatch(text), thread=True, exclusive=True, group="dispatch")
@@ -568,6 +647,7 @@ class CuratorShellApp(App[None]):
 
     def _render_response(self, response: ShellResponse) -> None:
         """Write a response, expose its menu, and honor exit requests."""
+        self._flush_tool_group()
         if response.text:
             self._write(response.text)
         self._busy = False
