@@ -41,6 +41,26 @@ from curator.tui.setup_screen import SetupScreen
 from curator.tui.trust_screen import TrustScreen
 
 _MAX_SUGGESTIONS = 6
+
+# Music-production words for each loop phase, so the busy indicator reads like producing a
+# track rather than a flat "working". Keyed by LoopStepType value.
+_PHASE_WORDS = {
+    "plan": "Composing",
+    "implement": "Arranging",
+    "validate": "Mixing",
+    "review": "Auditioning",
+    "confirm": "Mastering",
+}
+_DEFAULT_PHASE_WORD = "Cueing up"
+
+
+def _fmt_tokens(count: int) -> str:
+    """Format a token count compactly for the working line, e.g. 1500 -> '1.5k'."""
+    if count >= 1_000_000:
+        return f"{count / 1_000_000:.1f}M"
+    if count >= 1_000:
+        return f"{count / 1_000:.1f}k"
+    return str(count)
 # Bound the plain-text transcript mirror so a long streamed run cannot grow it without
 # limit (the on-screen log is already capped); mirrors the _history[-100:] cap.
 _MAX_TRANSCRIPT_ENTRIES = 2000
@@ -100,6 +120,8 @@ class CuratorShellApp(App[None]):
         self._completion_index = 0
         self._completion_prefix: str | None = None
         self._palette_matches: list[str] = []
+        self._run_provider: str | None = None
+        self._provider_tokens: dict[str, int] = {}
         self._menu: MenuSpec | None = None
         self._menu_index = 0
         self._trust_required = _should_check_trust()
@@ -270,8 +292,20 @@ class CuratorShellApp(App[None]):
         self.query_one("#log", ReflowRichLog).write_entry(renderable)
 
     def _emit_provider_event(self, event: ProviderEvent) -> None:
-        """Stream one provider progress line into the log."""
-        self.call_from_thread(self._write, render_provider_event(event), True)
+        """Stream one provider progress line into the log (called from the worker thread)."""
+        self.call_from_thread(self._on_provider_event, event)
+
+    def _on_provider_event(self, event: ProviderEvent) -> None:
+        """Record provider/token attribution on the UI thread, then write the line."""
+        provider = event.payload.get("provider")
+        if isinstance(provider, str) and provider:
+            self._run_provider = provider
+        tokens = event.payload.get("tokens")
+        if isinstance(tokens, int) and self._run_provider:
+            self._provider_tokens[self._run_provider] = (
+                self._provider_tokens.get(self._run_provider, 0) + tokens
+            )
+        self._write(render_provider_event(event), True)
 
     def _status_text(self) -> str:
         """Build the persistent footer from durable mode and seat bindings."""
@@ -312,11 +346,39 @@ class CuratorShellApp(App[None]):
         self._status_connection = connection
         return connection
 
+    def _current_phase_word(self) -> str:
+        """Return the music-production word for the loop step currently running.
+
+        Reads the active iteration's step_type from the ledger so the indicator follows the
+        real phase (plan/implement/verify/review), including the deterministic verify step
+        that emits no provider event. Falls back to the default word between steps.
+        """
+        connection = self._status_ledger_connection()
+        if connection is None:
+            return _DEFAULT_PHASE_WORD
+        try:
+            row = connection.execute(
+                "SELECT step_type FROM loop_iterations WHERE status = 'running' "
+                "ORDER BY started_at DESC LIMIT 1"
+            ).fetchone()
+        except sqlite3.Error:
+            return _DEFAULT_PHASE_WORD
+        if row is None:
+            return _DEFAULT_PHASE_WORD
+        return _PHASE_WORDS.get(str(row[0]), _DEFAULT_PHASE_WORD)
+
     def _working_line(self) -> str:
-        """Return the amber working indicator shown just above the input."""
+        """Return the phase indicator shown just above the input, with provider token use."""
         frame = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"[self._spinner_index % 10]
         elapsed = 0.0 if self._busy_started_at is None else time.monotonic() - self._busy_started_at
-        return f"[#5b9bff]{frame}[/] Working… {elapsed:.1f}s · Esc interrupts"
+        word = self._current_phase_word()
+        tokens = self._provider_tokens.get(self._run_provider or "", 0)
+        usage = (
+            f" · {self._run_provider}: {_fmt_tokens(tokens)}"
+            if self._run_provider and tokens
+            else ""
+        )
+        return f"[#5b9bff]{frame}[/] {word}… {elapsed:.1f}s{usage} · Esc interrupts"
 
     def _refresh_status(self) -> None:
         """Re-render the bottom status bar."""
@@ -477,6 +539,8 @@ class CuratorShellApp(App[None]):
         self.state.cancellation.reset()
         self._busy_started_at = time.monotonic()
         self._spinner_index = 0
+        self._run_provider = None
+        self._provider_tokens = {}
         self.query_one("#input", Input).disabled = True
         self.query_one("#hints", Static).update(self._working_line())
         self.run_worker(lambda: self._dispatch(text), thread=True, exclusive=True, group="dispatch")

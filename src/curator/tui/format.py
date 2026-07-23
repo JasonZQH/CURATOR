@@ -35,4 +35,9 @@ def render_provider_event(event: ProviderEvent) -> str:
     label = f" {escape_markup(event.label)}" if event.label else ""
     if event.kind is ProviderEventKind.OUTPUT_CHUNK:
         return f"[{style}]{escape_markup(str(event.payload.get('text', '')))}[/{style}]"
-    return f"[{style}]{escape_markup(event.kind.value)}{label}[/{style}]"
+    head = f"[{style}]{escape_markup(event.kind.value)}{label}[/{style}]"
+    if event.kind is ProviderEventKind.TOOL_CALL:
+        detail = str(event.payload.get("detail", "")).strip()
+        if detail:
+            return f"{head} [#7e8bad]{escape_markup(detail)}[/]"
+    return head

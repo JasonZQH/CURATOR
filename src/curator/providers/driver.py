@@ -80,7 +80,14 @@ class LegacyProviderDriver:
     ) -> RoleOutput | ProviderRunResponse:
         """Run the wrapped provider and emit synthetic lifecycle events."""
         _ = request
-        _emit(on_event, ProviderEventKind.STARTED, spec.id, 0, label=spec.role.value)
+        _emit(
+            on_event,
+            ProviderEventKind.STARTED,
+            spec.id,
+            0,
+            label=spec.role.value,
+            payload={"provider": self.provider_name.value},
+        )
         try:
             output = self.provider.run(spec)
         except Exception:
@@ -182,7 +189,14 @@ class SubprocessDriver:
         )
         events: list[ProviderEvent] = []
         sequence = 0
-        _emit(on_event, ProviderEventKind.STARTED, spec.id, sequence, label=" ".join(argv[:2]))
+        _emit(
+            on_event,
+            ProviderEventKind.STARTED,
+            spec.id,
+            sequence,
+            label=" ".join(argv[:2]),
+            payload={"provider": self.provider_name.value},
+        )
 
         async def _read_stdout() -> None:
             """Read provider stdout lines and emit parsed provider events."""

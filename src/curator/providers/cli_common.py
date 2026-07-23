@@ -12,6 +12,31 @@ REVIEWER_SLOT = "reviewer"
 _SUMMARY_CHARS = 400
 
 
+def usage_tokens(payload: dict) -> int | None:
+    """Return the total token count from a provider usage block, tolerating shapes.
+
+    Looks for a nested ``usage`` object (top level or under ``message``) and prefers a
+    total, else sums input + output. Returns None when no token counts are present, so
+    callers can omit the field rather than reporting a fake zero.
+    """
+    usage = payload.get("usage")
+    if not isinstance(usage, dict):
+        message = payload.get("message")
+        usage = message.get("usage") if isinstance(message, dict) else None
+    if not isinstance(usage, dict):
+        return None
+    for key in ("total_tokens", "total"):
+        total = usage.get(key)
+        if isinstance(total, int):
+            return total
+    parts = [
+        usage.get(key)
+        for key in ("input_tokens", "output_tokens", "cache_read_input_tokens")
+        if isinstance(usage.get(key), int)
+    ]
+    return sum(parts) if parts else None
+
+
 def build_cli_provider_response(
     spec: HarnessRunSpec,
     request: ProviderRunRequest,
