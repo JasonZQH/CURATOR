@@ -112,6 +112,61 @@ flowchart LR
       </div>
     </section>
 
+    <section class="sec" id="parallel-worktrees">
+      <div class="sec-eyebrow"><span class="mark">P</span> Parallel agents</div>
+      <h2>Multi-worktree parallel execution</h2>
+      <p>
+        Phase 0 protects the single project directory with a <strong>clean baseline + project
+        lock</strong>: the writer's first dispatch refuses a dirty tree, and a global
+        <code>fcntl</code> lock enforces exactly one writer per project. That guard exists so the
+        <code>git diff HEAD</code> Curator SHA-256-hashes as tamper-evident evidence is
+        attributable to one writer. It is a single-writer stopgap — <em>not</em> scaffolding for
+        parallelism. The V1 Workspace/Worktree model <strong>supersedes</strong> it.
+      </p>
+      <p>
+        The direction: give every parallel agent its <strong>own git worktree and branch, forked
+        from a recorded base commit SHA</strong>. Capture each agent's evidence as
+        <code>git diff &lt;baseSHA&gt;</code> <em>inside</em> that worktree — not
+        <code>git diff HEAD</code> — and store the base SHA alongside the content hash. This keeps
+        the tamper-evident guarantee (arguably strengthens it): each diff is complete
+        (covers committed <em>and</em> uncommitted agent work), attributable for free
+        (branch = agent = writer), revertable for free (drop the branch/worktree), and independently
+        reproducible from repo state. Cross-agent write races disappear, so the clean-tree guard is
+        no longer needed once worktrees exist.
+      </p>
+      <p>
+        This is the convergent industry answer. <strong>Claude Code</strong> runs parallel sessions
+        and <code>isolation: worktree</code> sub-agents in per-session worktrees under
+        <code>.claude/worktrees/&lt;session-id&gt;/</code> and imposes no clean-tree requirement.
+        <strong>Orca</strong> (Stably AI) is worktree-native: each task gets a worktree + branch
+        forked from a committed start-from ref, sidestepping the dirty-tree problem by isolation
+        rather than a gate. Both avoid the clean-tree requirement precisely because each agent
+        branches from a committed ref.
+      </p>
+      <h3>Isolation substrate — why worktrees, not the alternatives</h3>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>Substrate</th><th>Attribution</th><th>Evidence integrity</th><th>Verdict</th></tr></thead>
+          <tbody>
+            <tr><td>Worktree + branch per agent, diff vs recorded base SHA</td><td>Free — branch = agent</td><td>Complete, reproducible from repo state; strengthens the SHA-256 hash</td><td><strong>Chosen</strong> — the V1 substrate.</td></tr>
+            <tr><td>Ephemeral branch in one serialized tree</td><td>Per-commit</td><td>Fine, but one working tree kills real parallelism</td><td>Acceptable only for tiny N.</td></tr>
+            <tr><td>VM / container per agent (Devin, OpenHands)</td><td>Per-branch / PR</td><td>Same git story as worktrees</td><td>Overkill locally; revisit only for remote/cloud execution.</td></tr>
+            <tr><td>Content snapshot outside git (Cursor / Aider checkpoints)</td><td>Snapshot boundary</td><td>Lives outside git, not reproducible from repo state — hashing a blob is weaker than a canonical diff</td><td>Avoid as substrate; fine as revert-UX only.</td></tr>
+            <tr><td>Auto-stash around the agent</td><td>None</td><td>Non-deterministic; <code>stash pop</code> conflicts; no branch identity</td><td>Avoid — directly undermines a clean per-agent diff.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout">
+        <strong>Phase 0 bridge (shipped in v0.1.0):</strong> the clean-tree guard stays, but the
+        dirty pause now offers an opt-in convenience — <code>/resume stash</code> tucks the user's
+        uncommitted work into a git stash so the writer runs on a clean baseline (restore later with
+        <code>git stash pop</code>), plus a clearer pause card explaining the choice. This is a
+        single-writer dogfooding convenience, <em>not</em> the isolation substrate; it deliberately
+        does not auto-pop (auto-pop risks a mid-loop merge conflict) and does not touch worktrees.
+        The reserved <code>.curator/worktrees/</code> path is the only forward hook in code today.
+      </div>
+    </section>
+
     <section class="sec" id="memory">
       <div class="sec-eyebrow"><span class="mark">H</span> Agent memory</div>
       <h2>Evidence-backed, not chatbot memory</h2>

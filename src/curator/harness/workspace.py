@@ -103,6 +103,48 @@ def require_clean_baseline(baseline: WorkspaceBaseline) -> None:
         )
 
 
+def stash_workspace(project_root: Path | str) -> str | None:
+    """Stash all uncommitted changes so the writer runs on a clean tree.
+
+    The opt-in convenience behind a `WorkspaceDirtyError` pause: instead of
+    forcing the user to commit or stash by hand, `/resume stash` calls this to
+    tuck their work away, giving the writer a clean baseline and an evidence
+    diff attributable to the writer alone. Curator's own `.curator/` state is
+    excluded from the stash by an explicit pathspec, matching capture_baseline's
+    exclusion rather than relying on the project happening to git-ignore it — so
+    the open sqlite ledger is never swept out from under the running loop.
+
+    Returns the stash ref when a stash was created, or None when there was
+    nothing to stash or the path is not a git repo. A failed/empty stash is
+    intentionally advisory: the caller's clean-tree guard re-fires and re-pauses
+    if the tree is still dirty, so the writer can never run on a dirty baseline.
+    The stash is NOT auto-restored: the user pops it (`git stash pop`) once the
+    delivery is reviewed.
+
+    ponytail: stash-only, no auto-pop. Auto-popping mid-loop risks a merge
+    conflict at an awkward moment if the writer touched the same files; deferring
+    the pop to the user keeps the run clean. Upgrade path: auto-pop after the
+    confirm gate once conflict handling exists.
+    """
+    root = Path(project_root)
+    if not _is_git_repo(root):
+        return None
+    result = _git(
+        root,
+        "stash",
+        "push",
+        "--include-untracked",
+        "-m",
+        "curator: auto-stash before writer run",
+        "--",
+        ".",
+        ":(exclude).curator",
+    )
+    if result.returncode != 0 or "No local changes to save" in result.stdout:
+        return None
+    return "stash@{0}"
+
+
 def _untracked_files(root: Path) -> list[str]:
     """Return untracked files that are not ignored by git."""
     result = _git(root, "ls-files", "--others", "--exclude-standard")

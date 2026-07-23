@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 
 from curator.core.enums import LoopStatus, LoopStepType, PauseStatus, TaskStatus
 from curator.core.schema import GoalContract, MemoryEntryRecord, PauseRecord
+from curator.harness.workspace import stash_workspace
 from curator.providers.base import Provider
 from curator.providers.events import ProviderEventCallback
 from curator.providers.driver import driver_for_provider
@@ -40,11 +41,17 @@ from curator.state.repositories import (
 from curator.state.transaction import transaction
 
 _AFFIRMATIVE = {"yes", "y", "confirm", "confirmed", "lgtm", "approve", "approved", "ship it"}
+_STASH_INTENT = {"stash", "stash & continue", "stash and continue"}
 
 
 def _affirmative(message: str) -> bool:
     """Return whether a resume message confirms delivery."""
     return message.strip().lower() in _AFFIRMATIVE
+
+
+def _is_stash_resume(pause: PauseRecord, message: str) -> bool:
+    """Return whether a dirty-workspace pause is being resumed with a stash."""
+    return pause.resume_mode == "workspace_dirty" and message.strip().lower() in _STASH_INTENT
 
 
 def _open_pause(connection: sqlite3.Connection, loop_run_id: str) -> PauseRecord | None:
@@ -134,6 +141,8 @@ async def resume_workflow(
     if pause is None:
         return False
 
+    stash_resume = _is_stash_resume(pause, message)
+    dirty_pause = pause.resume_mode == "workspace_dirty"
     now = created_at or datetime.now(UTC)
     with transaction(connection):
         insert_pause_record(
@@ -152,9 +161,19 @@ async def resume_workflow(
             write_loop_completion(connection, loop_run, LoopStatus.DONE, now)
             return True
 
-        _record_resume_guidance(connection, str(session.project_root), pause, message)
+        # A workspace-dirty resume ("stash", or a plain continue after a manual
+        # clean) is a command, not scope guidance — don't feed it to the writer.
+        if not dirty_pause:
+            _record_resume_guidance(connection, str(session.project_root), pause, message)
         running = loop_run.model_copy(update={"status": LoopStatus.RUNNING, "updated_at": now})
         insert_loop_run(connection, running)
+
+    # Stash the user's changes so the re-run writer gets a clean baseline. Done
+    # after the ledger commit, before _run_steps. The return is intentionally
+    # advisory: if the stash fails or finds nothing, the clean-tree guard re-fires
+    # and re-pauses, so the writer can never run on a dirty baseline.
+    if stash_resume:
+        stash_workspace(session.project_root)
 
     state = LoopExecutionState(
         pending_steps=_writer_onward(plan.steps),

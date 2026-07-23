@@ -449,6 +449,27 @@ def _pause_reason_for_provider_error(provider_error: Exception) -> str | None:
     return None
 
 
+_WORKSPACE_DIRTY_PAUSE = {
+    "pause_question": (
+        "Your working tree has uncommitted changes. The writer needs a clean "
+        "tree so its recorded diff is attributable to the writer alone."
+    ),
+    "pause_requested_input": (
+        "Reply `/resume stash` to stash your changes and continue (restore them "
+        "later with `git stash pop`), or stash/commit them yourself and reply "
+        "`/resume continue`."
+    ),
+    "pause_resume_mode": "workspace_dirty",
+}
+
+
+def _pause_overrides_for_provider_error(provider_error: Exception | None) -> dict[str, str]:
+    """Return pause-card overrides for errors that warrant a tailored prompt."""
+    if isinstance(provider_error, WorkspaceDirtyError):
+        return dict(_WORKSPACE_DIRTY_PAUSE)
+    return {}
+
+
 def _pause_record_for_decision(
     loop_run_id: str,
     iteration: LoopIterationRecord,
@@ -972,6 +993,7 @@ async def _execute_provider_step(
 
     step_completed_at = _timestamp(ctx.created_at)
     provider_stop_metadata = _provider_stop_metadata(result, provider_error)
+    pause_overrides = _pause_overrides_for_provider_error(provider_error)
     iteration = iteration.model_copy(
         update={
             "status": (
@@ -991,7 +1013,7 @@ async def _execute_provider_step(
         stop_condition=runtime_decision.stop_condition,
         reason=runtime_decision.reason,
         created_at=step_completed_at,
-        metadata=provider_stop_metadata,
+        metadata={**provider_stop_metadata, **pause_overrides},
     )
 
     insert_loop_iteration(connection, iteration)
