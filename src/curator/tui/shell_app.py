@@ -8,6 +8,7 @@ from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.suggester import SuggestFromList
 from textual.widgets import Input, OptionList, Static
 from textual.widgets.option_list import Option
 
@@ -115,7 +116,13 @@ class CuratorShellApp(App[None]):
             yield Static("", id="hints")
             with Horizontal(id="composer"):
                 yield Static("›", id="prompt-caret")
-                yield Input(placeholder="Type what you want to work on, or /help", id="input")
+                # SuggestFromList shows the top matching command as dimmed ghost text;
+                # Right-arrow / End accepts it (Tab still cycles the visible palette).
+                yield Input(
+                    placeholder="Type what you want to work on, or /help",
+                    id="input",
+                    suggester=SuggestFromList(KNOWN_SLASH_COMMANDS, case_sensitive=False),
+                )
             yield Static("", id="status")
 
     def on_mount(self) -> None:
@@ -346,6 +353,19 @@ class CuratorShellApp(App[None]):
         """Hide the slash palette without changing the prompt value."""
         self.query_one("#palette", SlashPalette).styles.display = "none"
         self._palette_matches = []
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        """Fill the input from a clicked slash-palette command so args can be typed next."""
+        if event.option_list.id != "palette":
+            return  # the setup/menu OptionList drives its own selection flow
+        command = event.option_id
+        if command is None:
+            return
+        input_widget = self.query_one("#input", Input)
+        input_widget.value = command
+        input_widget.cursor_position = len(command)
+        input_widget.focus()
+        event.stop()
 
     def on_key(self, event: events.Key) -> None:
         """Handle menu navigation, history, completion, and multiline input."""
