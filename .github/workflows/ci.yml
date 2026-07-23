@@ -93,9 +93,12 @@ jobs:
           uv run pytest -p no:cacheprovider -q
 
   release-smoke:
-    name: Build and clean-install smoke
+    name: Build, clean-install smoke, and publish artifacts
     if: startsWith(github.ref, 'refs/tags/v')
+    needs: [guard, test, macos]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -119,3 +122,16 @@ jobs:
           python -m venv /tmp/curator-sdist-smoke
           /tmp/curator-sdist-smoke/bin/pip install dist/*.tar.gz
           /tmp/curator-sdist-smoke/bin/curator --version
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum ./*.whl ./*.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+      - name: Publish build artifacts to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" \
+            dist/*.whl dist/*.tar.gz dist/SHA256SUMS --clobber
