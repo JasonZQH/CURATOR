@@ -1,0 +1,13 @@
+# Keeps GitHub Actions and Python (uv) dependencies fresh. The github-actions
+# updates also handle version drift on the Actions pinned in CI, so we don't
+# hand-pin them to commit SHAs.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
