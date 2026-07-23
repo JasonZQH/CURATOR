@@ -25,6 +25,11 @@ packages.json
 *.sqlite
 *.sqlite3
 
+# Local agent/dev tooling (not part of the project)
+.claude/
+.codegraph/
+.mcp.json
+
 # Node tooling (docs diagram generation only; not part of the Python package)
 node_modules/
 package.json

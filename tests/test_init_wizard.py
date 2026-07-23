@@ -26,6 +26,7 @@ def test_build_init_proposal_lists_phase0_files_without_writing(tmp_path):
         tmp_path / ".curator" / "memory" / "roles" / "pm.md",
         tmp_path / ".curator" / "memory" / "roles" / "engineer.md",
         tmp_path / ".curator" / "memory" / "roles" / "qa.md",
+        tmp_path / ".curator" / ".gitignore",
         tmp_path / ".curator" / "curator.sqlite",
     ]
     assert not (tmp_path / ".curator").exists()

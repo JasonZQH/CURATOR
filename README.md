@@ -1,118 +1,188 @@
-# Curator
+<div align="center">
+
+<img src="docs/assets/curator-logo.png" alt="Curator" width="560">
+
+**The coding-agent workbench where the scheduler — not the model — stays in control.**
+
+Curator orchestrates real provider CLIs like **Claude Code** and **Codex** through an
+auditable control plane: it plans an accepted goal, dispatches a single writer, gates the
+loop on **deterministic verification**, runs a **fresh-context reviewer**, and pauses for
+you at a human confirmation gate — recording every decision, evidence ref, and pause to a
+durable local ledger you can resume from.
 
 [![CI](https://github.com/JasonZQH/CURATOR/actions/workflows/ci.yml/badge.svg)](https://github.com/JasonZQH/CURATOR/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
+[![Built by JasonZQH](https://img.shields.io/badge/built%20by-JasonZQH-orange.svg)](https://github.com/JasonZQH)
 
-**A local-first coding-agent workbench that orchestrates real provider CLIs behind an
-auditable, scheduler-owned control plane.**
+</div>
 
-Curator records accepted user goals, compiles them into auditable workflow sessions,
-dispatches real provider CLIs such as **Claude Code** or **Codex**, runs deterministic
-verification, captures evidence, and pauses for a human decision when provider setup,
-verification, scope, permissions, or workspace state need one.
+---
 
-The scheduler — not the provider — owns retry, pause, stop, and resume decisions, so
-failures, permission problems, missing verification commands, and scope changes stay
-inspectable instead of hidden inside a chat transcript.
+## Why Curator
 
-> Curator has no synthetic provider fallback. The CLI, REPL, scheduler, provider setup,
-> and diagnostics require real configured providers for user work (the test suite uses
-> local fake providers only).
+Run Claude Code or Codex directly and the important things — *why* a run continued, retried,
+or stopped; *who* actually wrote which change; *how* to pick up a half-finished task
+tomorrow — are trapped inside a chat transcript. Switch providers and you start over, with a
+different UI and no shared record. Curator keeps the model doing what it is good at — writing
+code — while a **deterministic scheduler owns retry, pause, stop, and resume** across every
+provider. When a run fails, stalls, needs a permission, or drifts in scope, you see exactly
+why, and you can resume it later from durable state instead of starting over.
 
-## Install
+| | |
+|---|---|
+| **Real providers, not a wrapper** | Dispatches the Claude Code and Codex CLIs behind an async streaming driver — tool calls, permissions, and output flow through as typed events, not an opaque chat. Prompt/context go via stdin, never argv. |
+| **The scheduler owns control flow** | Providers produce typed output; Curator alone decides continue, retry, pause, stop, and resume. Control flow never hides inside a transcript. |
+| **Deterministic verification** | The loop exits on real test/command results with content-hashed evidence — not on a model's self-reported "looks good." |
+| **Fresh-context, cross-provider review** | A second provider reviews the implementation and verification evidence *without* the writer's context and surfaces what the author cannot see. Advisory to the human confirm gate — it informs, it does not silently block. |
+| **Everything is on the ledger** | Every iteration, decision-with-reason, provider run, evidence ref, pause, and resume is a durable SQLite row under `.curator/`. Runs are auditable, and every change is attributed to the provider that made it. |
+| **Resume from anywhere** | Paused a loop yesterday? `/resume` rebuilds execution state from the ledger and continues — a confirm-gate "yes" finishes it, anything else re-runs the writer with your guidance. |
+| **Mix providers under one control plane** | Provider-neutral role slots let you bind, say, Claude Code as the writer and Codex as the reviewer — same auditable loop, either engine. |
+| **Local-first, no fallback theater** | No synthetic provider. A missing or broken CLI blocks setup and an unconfigured run pauses with next steps — never fake success. |
 
-Curator is a Python CLI. Any of the following work:
+## How a run works
+
+1. Your text becomes a durable goal draft, then an accepted goal revision.
+2. Curator compiles a single-writer Phase 0 workflow session.
+3. The **writer** provider gets a context package through stdin (prompt text is excluded from argv).
+4. The **verifier** runs discovered or explicit commands and produces hashed evidence.
+5. A fresh-context **reviewer** provider assesses the implementation and verification.
+6. A **human confirmation gate** pauses before delivery is marked done.
+7. Every step lands on the ledger, so `/resume` can continue a paused loop later.
+
+Everything above is **Phase 0** — local, single-writer, sequential. The broader V1 blueprint
+(dependency-aware scheduling, parallel workers, separate Agent/Runtime/Execution identities,
+provider-native TUI handoff) is a **migration target, not current capability**; this README
+describes only what ships today.
+
+## Getting started
+
+**Prerequisites.** A logged-in provider CLI on your `PATH` — [Claude Code](https://code.claude.com/docs)
+or [Codex](https://developers.openai.com/codex). Curator drives the real CLI; it never fakes a provider.
+
+**Install** — globally, the same way you'd install `claude-code` or `codex`:
 
 ```bash
-# One-line installer (bootstraps uv, then installs Curator)
+# One line — bootstraps uv, then installs the curator CLI (macOS / Linux / WSL2)
 curl -fsSL https://raw.githubusercontent.com/JasonZQH/CURATOR/main/install.sh | sh
+```
 
-# With pipx
+Or with pipx / uv:
+
+```bash
 pipx install "git+https://github.com/JasonZQH/CURATOR.git@v0.1.0"
-
-# With uv (no global install; run on demand)
 uvx --from "git+https://github.com/JasonZQH/CURATOR.git@v0.1.0" curator
 ```
 
-Pin to a released tag (`@v0.1.0`) for reproducible installs, or omit it to track `main`.
+> Pin a released tag (`@v0.1.0`) for a reproducible install, or drop it to track `main`.
+> On Windows, run inside WSL2.
 
-### From source
-
-```bash
-git clone https://github.com/JasonZQH/CURATOR.git
-cd CURATOR
-uv sync                 # or: python -m venv .venv && .venv/bin/pip install -e .
-uv run curator          # or: source .venv/bin/activate && curator
-```
-
-## Quickstart
+**Open it** — from any project directory:
 
 ```bash
-curator init --yes            # create local .curator/ state
-curator provider add claude-code
-curator provider add codex
-curator provider list
-curator                       # open the natural-language shell
+curator
 ```
 
-Inside the shell, connect and bind providers to functional slots:
+That drops you into the natural-language shell. First run walks you through trust, roles, and
+connecting a provider; then just say what you want to work on. Bind providers to functional
+slots and go:
 
 ```
-/provider add claude-code
 /agent bind writer.default claude-code
 /agent bind reviewer.default codex
+> add a --json flag to the export command
 ```
 
-Then type what you want to work on. Small requests start immediately; use `/gate on`
-to review the goal proposal first. Useful commands: `/workbench`, `/node current`,
-`/memory`, `/resume <answer>`, `/revise <scope>`, `/help`.
+Small requests start immediately; `/gate on` reviews the goal proposal first.
 
-## How it works
+> **Heads up:** Curator dispatches a real CLI with workspace-write permission. It blocks a
+> dirty git tree before a writer runs so changes are never misattributed — commit, stash, or
+> reply `/resume stash` to tuck your changes aside automatically (restore later with
+> `git stash pop`).
 
-1. User text becomes a durable goal draft and an accepted goal revision.
-2. The app creates a single-writer workflow session.
-3. The **writer** provider receives a context package rendered into the CLI prompt.
-4. Curator blocks a dirty git workspace before writer dispatch to avoid misattribution.
-5. The **verifier** runs discovered or explicit verification commands and produces hashed evidence.
-6. A fresh-context **reviewer** provider reviews the implementation and verification evidence.
-7. A **human confirmation gate** pauses before marking delivery done.
+## Versions
 
-Every iteration, decision (with reason), provider run, evidence ref, pause, and resume is
-persisted to a local SQLite ledger under `.curator/`, so a run is fully replayable and
-`/resume` can continue a paused loop from durable state.
+**Released**
 
-## Why
+| Version | Status | What it is |
+|---|---|---|
+| **v0.1.0** | Current | Phase 0 — local · single-writer · sequential. `Goal → writer → deterministic verifier → fresh-context reviewer → human confirm`, on a durable SQLite ledger. Opt-in `/resume stash` for the clean-tree guard. |
 
-Providers stay out of scheduler control flow: they produce typed output, provider
-responses, workspace evidence, and streamed events, while the scheduler owns retry,
-pause, stop, and resume. Real provider setup is explicit on purpose — a fallback provider
-creates misleading confidence, so a missing or broken CLI blocks setup and a goal run
-without a configured provider pauses with next-step guidance instead of synthesizing
-success.
+v0.1.0 highlights: full-screen first-run trust & setup, keyboard-selectable slash commands and
+proposal actions, PM/Engineer/Reviewer seat labels, persistent history with Tab completion and
+Shift+Enter continuation.
 
-## Development
+**Roadmap** — planned targets, not current capability:
 
-```bash
-uv sync --dev
-source .venv/bin/activate
-pytest -p no:cacheprovider -q
-ruff check src tests
-```
+| Milestone | Focus |
+|---|---|
+| V1.1 · Canonical Model | Durable Project / Session / Goal / Task / Dependency entities, append-only events |
+| V1.2 · Runtime Registry | Agent & Execution runtimes, leases, heartbeats, capability probes |
+| V1.3 · Scheduler | Goal → Task DAG, ready queue, retry/approval policy, workspace ownership |
+| V1.4 · Runtime UX | Control Desk, tmux backend, provider-TUI focus/sync |
+| V1.5 · Recovery | Handoff snapshots, machine-restart recovery, artifact replay |
+| V1.6 · Parallel Workers | Up to 4 local parallel workers on independent ready tasks |
 
-Contributions branch off `origin/dev` and merge back via pull request; `main` is the
-protected, release-tagged branch and is never committed to directly. See
-[docs/orchestration.html](docs/orchestration.html) for the runtime and control-plane
-design, plus the other design notes under [`docs/`](docs/).
+Full history in [CHANGELOG.md](CHANGELOG.md).
+
+## Commands
+
+**Terminal — `curator …`**
+
+| Command | Description |
+|---|---|
+| `curator` | Open the natural-language shell/TUI for the current project |
+| `curator init` | Create local `.curator/` state (`--yes` to write, `-C` to target a dir) |
+| `curator setup` | Guided setup: roles → providers → login |
+| `curator provider add <name>` | Detect and register a provider CLI (`claude-code` / `codex`) |
+| `curator provider list` | List configured provider profiles |
+| `curator status` | Show current project state |
+| `curator doctor` | Run environment and readiness checks |
+| `curator reset` | Archive the ledger and clear runtime state (`--hard` removes `.curator/`) |
+| `curator contract validate` | Validate editable role contracts |
+| `curator --version` | Print the version |
+
+**In-shell — slash commands**
+
+| Area | Commands |
+|---|---|
+| Start work | type a request · `/gate on\|off` · `yes` / `no` / `edit <text>` |
+| Watch progress | `/workbench` · `/node current` · `/evidence` · `/status` |
+| Handle pauses | `/resume <answer>` · `/resume stash` · `/resume continue` · `/revise <scope>` · `/cancel` |
+| Providers & slots | `/providers` · `/provider add <name>` · `/agents` · `/agent bind <slot> <provider>` |
+| Inspect & learn | `/memory` · `/history` · `/sessions` · `/help` · `/help all` |
+
+`/help` is task-oriented (what to do next); `/help all` lists every command. The full-screen
+TUI adds Up/Down history, Tab completion, Shift+Enter/Ctrl+J continuation lines, Esc
+interruption, and two-stage Ctrl+C shutdown.
+
+## Known limitations
+
+Phase 0 is deliberately narrow. Where a claim above could be read more broadly than the code
+delivers, the boundary is spelled out here:
+
+- **Serial, single-writer.** One writer runs at a time; there is no parallel worker or
+  dependency-aware DAG yet. Project writes are serialized through a local `flock`
+  (`.curator/runtime.lock`), which does not coordinate across network filesystems.
+- **The auditable system-of-record is the decisions, not the transcript.** The durable,
+  queryable truth is the iteration / decision-with-reason / evidence / provider-run rows.
+  Provider stdout is persisted as `OUTPUT_CHUNK` rows that are a **redacted, continuous
+  delta** of the stream — they do not map one-to-one to source chunks and the transcript is
+  not replayed. `/resume` rebuilds execution state from the decision/evidence rows.
+- **Cancellation boundary.** The bundled Claude Code and Codex adapters convert a cancel into
+  a typed error, and that run's streamed transcript is preserved on the ledger. A bare
+  `asyncio.CancelledError` propagating straight through rolls back the in-flight streamed
+  batch by design (the step commits its transcript in one transaction).
+- **Platform.** macOS is the primary test target, Linux runs in CI, and Windows is
+  unsupported (use WSL2).
+
+## Contributing
+
+Curator is developed on the `dev` branch; `main` is protected and release-tagged. Anyone can
+[open an issue](https://github.com/JasonZQH/CURATOR/issues/new/choose); invited contributors
+open pull requests into `dev`. See **[CONTRIBUTING.md](CONTRIBUTING.md)** for the workflow,
+local development setup, and how to run the test suite.
 
 ## License
 
-[MIT](LICENSE)
-
-## Roadmap
-
-- Development-only simulator outside production CLI paths for demos.
-- Parse structured provider-reported verification commands from final output.
-- Opt-in dirty-workspace mode with stronger diff partitioning.
-- Provider health and quota tracking for smarter slot routing.
-- Richer reviewer evidence while preserving fresh-context isolation.
+[MIT](LICENSE) © JasonZQH

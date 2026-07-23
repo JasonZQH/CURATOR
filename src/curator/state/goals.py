@@ -4,7 +4,7 @@ import sqlite3
 from typing import Any
 
 from curator.core.schema import GoalRevisionRecord, GoalRunRecord
-from curator.state._mapping import fetch_one, iso_or_none, json_dumps, json_loads
+from curator.state._mapping import fetch_one, iso_or_none, json_dumps, json_loads, maybe_commit
 
 
 def insert_goal_identity(
@@ -37,7 +37,18 @@ def insert_goal_identity(
             json_dumps(metadata or {}),
         ),
     )
-    connection.commit()
+    maybe_commit(connection)
+
+
+def update_goal_status(
+    connection: sqlite3.Connection, goal_id: str, status: str, updated_at: str
+) -> None:
+    """Update one goal identity's durable status and updated_at timestamp."""
+    connection.execute(
+        "update goals set status = ?, updated_at = ? where id = ?",
+        (status, updated_at, goal_id),
+    )
+    maybe_commit(connection)
 
 
 def insert_goal_revision(
@@ -62,7 +73,7 @@ def insert_goal_revision(
             json_dumps(revision.metadata),
         ),
     )
-    connection.commit()
+    maybe_commit(connection)
 
 
 def insert_goal_run(connection: sqlite3.Connection, run: GoalRunRecord) -> None:
@@ -86,7 +97,7 @@ def insert_goal_run(connection: sqlite3.Connection, run: GoalRunRecord) -> None:
             json_dumps(run.metadata),
         ),
     )
-    connection.commit()
+    maybe_commit(connection)
 
 
 def _map_goal_revision(row: sqlite3.Row) -> dict[str, Any]:

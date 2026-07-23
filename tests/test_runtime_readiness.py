@@ -5,7 +5,7 @@ from pathlib import Path
 
 from curator.app import start_goal_loop, write_init_state
 from curator.context.packaging import build_context_package, build_pm_research_packet
-from curator.core.enums import LoopStepType, ProviderName, RoleName
+from curator.core.enums import GoalStatus, LoopStatus, LoopStepType, ProviderName, RoleName
 from curator.core.paths import build_curator_paths
 from curator.core.schema import HarnessRunSpec, QAValidationOutput
 from curator.goals.store import accept_goal, propose_goal, save_goal
@@ -17,20 +17,23 @@ from curator.providers.contracts import (
     ProviderRunResponse,
     ScopeChangeSignal,
 )
-from fakes import CodingDeliveryFakeProvider
+from fakes import CodingDeliveryFakeProvider, enable_live_mode, install_fake_claude
 from curator.runtime.action_policy import ActionPolicy, ActionRequest, ActionType
 from curator.scheduler.snapshots import load_latest_workflow_snapshot
 from curator.shell.repl import ShellState, handle_shell_input
 from curator.state.db import connect_database, initialize_database
+from curator.scheduler.recovery import reconcile_project
 from curator.state.repositories import (
     load_context_packages_for_run,
     load_goal_draft_for_discovery,
     load_latest_discovery_session,
     load_latest_pause_record,
+    load_loop_run,
     load_pause_records_for_run,
     load_provider_runs_for_run,
     load_resume_events_for_pause,
 )
+from curator.tui.workflow_panel import render_workflow_lines
 
 
 class AlwaysFailValidationProvider(CodingDeliveryFakeProvider):
@@ -57,8 +60,33 @@ def _accepted_goal_revision(project_root: Path, text: str = "Fix mobile login la
     return accept_goal(paths, goal.id).revision_id
 
 
+def test_start_goal_loop_syncs_goal_identity_status_off_running(tmp_path):
+    """Verify the durable goal identity status is synced to the terminal state, not left 'running'.
+
+    goals.status is written RUNNING up-front, and no user surface reads it today, so this guards
+    the durable ledger: a future goal-history reader would otherwise see every finished goal as
+    still running. The identity must end consistent with the goal_run's terminal status.
+    """
+    revision_id = _accepted_goal_revision(tmp_path)
+    snapshot = start_goal_loop(tmp_path, revision_id, provider=CodingDeliveryFakeProvider())
+    loop_run = snapshot.loop_runs[-1]
+    assert loop_run.status is not LoopStatus.RUNNING  # the loop actually finished
+
+    connection = connect_database(build_curator_paths(tmp_path).database)
+    initialize_database(connection)
+    goal_status = connection.execute("select status from goals").fetchone()["status"]
+    run_status = connection.execute(
+        "select status from goal_runs where loop_run_id = ?", (loop_run.id,)
+    ).fetchone()["status"]
+    connection.close()
+
+    assert goal_status != GoalStatus.RUNNING.value
+    assert goal_status == run_status
+
+
 def test_shell_recovers_goal_draft_and_history_from_sqlite(tmp_path):
     """Verify PM discovery discussion survives shell restart before goal acceptance."""
+    enable_live_mode(tmp_path)
     first_state = ShellState(project_root=tmp_path, gate_mode=True)
 
     draft_response = handle_shell_input(first_state, "Fix mobile login layout")
@@ -82,8 +110,10 @@ def test_shell_recovers_goal_draft_and_history_from_sqlite(tmp_path):
     assert draft.contract["summary"] == "Fix mobile login layout"
 
 
-def test_goal_current_prefers_accepted_revision_after_loop_start(tmp_path):
+def test_goal_current_prefers_accepted_revision_after_loop_start(tmp_path, monkeypatch):
     """Verify accepted goals take precedence over stale draft recovery."""
+    enable_live_mode(tmp_path)
+    install_fake_claude(tmp_path, monkeypatch)
     state = ShellState(project_root=tmp_path, gate_mode=True)
 
     handle_shell_input(state, "Fix mobile login layout")
@@ -95,22 +125,29 @@ def test_goal_current_prefers_accepted_revision_after_loop_start(tmp_path):
     assert "Draft goal:" not in recovered_goal.text
 
 
-def test_shell_accepts_recovered_goal_draft_after_restart(tmp_path):
-    """Verify yes accepts the latest SQLite draft without ShellState cache."""
+def test_shell_accepts_recovered_goal_draft_after_restart(tmp_path, monkeypatch):
+    """Verify /goal start accepts the latest SQLite draft without ShellState cache."""
+    enable_live_mode(tmp_path)
+    install_fake_claude(tmp_path, monkeypatch)
     handle_shell_input(
         ShellState(project_root=tmp_path, gate_mode=True), "Fix mobile login layout"
     )
 
-    accepted = handle_shell_input(ShellState(project_root=tmp_path), "yes")
+    guided = handle_shell_input(ShellState(project_root=tmp_path), "yes")
+    accepted = handle_shell_input(ShellState(project_root=tmp_path), "/goal start")
     current = handle_shell_input(ShellState(project_root=tmp_path), "/goal current")
 
+    assert "No pending proposal" in guided.text
+    assert "/goal start" in guided.text
     assert "Goal accepted:" in accepted.text
     assert "Accepted goal:" in current.text
     assert "goal-fix-mobile-login-layout-rev-001" in current.text
 
 
-def test_paused_node_and_resume_are_durable_across_shell_restart(tmp_path):
+def test_paused_node_and_resume_are_durable_across_shell_restart(tmp_path, monkeypatch):
     """Verify paused node context and resume answers are recovered from SQLite."""
+    enable_live_mode(tmp_path)
+    install_fake_claude(tmp_path, monkeypatch)
     revision_id = _accepted_goal_revision(tmp_path)
     snapshot = start_goal_loop(
         tmp_path,
@@ -124,8 +161,9 @@ def test_paused_node_and_resume_are_durable_across_shell_restart(tmp_path):
         ShellState(project_root=tmp_path),
         "Please keep scope and repair only the failing validation.",
     )
+    resume_events_seen = []
     resume_response = handle_shell_input(
-        ShellState(project_root=tmp_path),
+        ShellState(project_root=tmp_path, emit_event=resume_events_seen.append),
         "/resume Please keep scope and repair only the failing validation.",
     )
 
@@ -139,7 +177,7 @@ def test_paused_node_and_resume_are_durable_across_shell_restart(tmp_path):
     assert "Role: qa" in node_response.text
     assert "Verify the implementation" in node_response.text
     assert "Paused:" in node_response.text
-    assert "No verification commands configured; pausing for user input." in node_response.text
+    assert "No verification commands were found" in node_response.text
     assert "A loop is paused:" in notice_response.text
     assert "/resume" in notice_response.text
     assert "/revise" in notice_response.text
@@ -150,6 +188,23 @@ def test_paused_node_and_resume_are_durable_across_shell_restart(tmp_path):
     assert pauses[0].status.value == "resolved"
     assert resume_events[0].message == "Please keep scope and repair only the failing validation."
     assert len(recovered.loop_iterations) >= len(snapshot.loop_iterations)
+    assert resume_events_seen
+
+
+def test_paused_snapshot_renders_question_immediately(tmp_path):
+    """Verify a paused run response includes the actionable question directly."""
+    revision_id = _accepted_goal_revision(tmp_path)
+    snapshot = start_goal_loop(
+        tmp_path,
+        revision_id,
+        provider=AlwaysFailValidationProvider(),
+    )
+
+    lines = render_workflow_lines(snapshot)
+
+    assert "Paused:" in lines
+    assert "- Question: How should Curator proceed from this paused node?" in lines
+    assert "- Continue with: /resume <message>" in lines
 
 
 def test_revise_command_creates_revised_goal_draft_from_pause(tmp_path):
@@ -207,6 +262,32 @@ def test_cancel_resolves_paused_loop_cursor(tmp_path):
     assert resume_events[0].action == "cancel"
     assert latest_pause is None
     assert "Paused:\n- none" in node.text
+
+
+def test_cancel_is_terminal_and_not_resurrected_by_recovery(tmp_path):
+    """Verify a /cancel'd paused loop is terminal so the next-launch reconcile does not resurrect it.
+
+    /cancel used to only resolve the pause record while leaving the loop PAUSED; startup recovery
+    then treated 'paused with no open pause' as a crash and recreated an interrupted pause. The
+    loop must reach a terminal CANCELLED status that reconcile ignores.
+    """
+    revision_id = _accepted_goal_revision(tmp_path)
+    snapshot = start_goal_loop(tmp_path, revision_id, provider=AlwaysFailValidationProvider())
+    loop_run = snapshot.loop_runs[-1]
+    assert loop_run.status is LoopStatus.PAUSED  # the loop paused waiting for the user
+
+    handle_shell_input(ShellState(project_root=tmp_path), "/cancel")
+
+    # The next-launch reconcile must not treat the cancelled loop as an interrupted crash.
+    assert reconcile_project(tmp_path) == 0
+
+    connection = connect_database(build_curator_paths(tmp_path).database)
+    initialize_database(connection)
+    recovered_loop = load_loop_run(connection, loop_run.id)
+    latest_pause = load_latest_pause_record(connection, loop_run.id)
+    connection.close()
+    assert recovered_loop.status is LoopStatus.CANCELLED
+    assert latest_pause is None  # no interrupted pause was recreated
 
 
 def test_provider_run_contract_and_ledger_capture_scheduler_owned_decisions(tmp_path):
@@ -472,8 +553,8 @@ def test_provider_failure_matrix_records_cancelled_timeout_and_permission(tmp_pa
         assert "pausing for user input" in pause.reason
 
 
-def test_provider_failure_matrix_records_provider_unavailable(tmp_path):
-    """Verify unavailable providers fail with typed ledger entries."""
+def test_provider_failure_matrix_stops_on_untyped_runtime_error(tmp_path):
+    """Verify an untyped provider bug fails instead of becoming a pause."""
 
     class UnavailableProvider:
         """Raise a generic provider availability failure."""

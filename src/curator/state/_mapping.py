@@ -5,8 +5,17 @@ import sqlite3
 from datetime import datetime
 from typing import Any, Callable, TypeVar
 
+from curator.state.db import CuratorConnection
+
 RecordT = TypeVar("RecordT")
 MapperT = Callable[[sqlite3.Row], dict[str, Any]]
+
+
+def maybe_commit(connection: sqlite3.Connection) -> None:
+    """Commit standalone writes while leaving active Curator transactions open."""
+    if isinstance(connection, CuratorConnection) and connection.txn_depth > 0:
+        return
+    connection.commit()
 
 
 def json_dumps(value: dict[str, Any]) -> str:

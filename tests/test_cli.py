@@ -1,13 +1,78 @@
 """Verify Curator command-line startup behavior."""
 
+import os
 import tomllib
+from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
 from typer.testing import CliRunner
 
+from curator.core.enums import (
+    ProviderBindingStatus,
+    ProviderName,
+    ProviderProfileStatus,
+)
 from curator.core.paths import build_curator_paths
+from curator.core.schema import ProviderProfileRecord, RoleProviderBindingRecord
 from curator.cli import app
+from curator.state.db import connect_database, initialize_database
+from curator.state.repositories import (
+    insert_provider_profile,
+    insert_role_provider_binding,
+)
+
+
+def _enable_live_mode(project_root: Path) -> None:
+    """Initialize state and bind a claude-code profile to both slots."""
+    runner = CliRunner()
+    result = runner.invoke(app, ["init", "--yes"])
+    assert result.exit_code == 0
+    now = datetime.now(UTC)
+    connection = connect_database(build_curator_paths(project_root).database)
+    try:
+        initialize_database(connection)
+        insert_provider_profile(
+            connection,
+            ProviderProfileRecord(
+                id="claude-code",
+                provider=ProviderName.CLAUDE_CODE,
+                label="claude-code (local CLI)",
+                credential_ref="local-cli",
+                status=ProviderProfileStatus.ACTIVE,
+                created_at=now,
+                updated_at=now,
+                metadata={"binary": "claude", "version": "test"},
+            ),
+        )
+        for role_instance_id in ("writer.default", "reviewer.default"):
+            insert_role_provider_binding(
+                connection,
+                RoleProviderBindingRecord(
+                    id=f"binding-{role_instance_id}-claude-code",
+                    role_instance_id=role_instance_id,
+                    provider_profile_id="claude-code",
+                    status=ProviderBindingStatus.ACTIVE,
+                    created_at=now,
+                    updated_at=now,
+                ),
+            )
+    finally:
+        connection.close()
+
+
+def _install_fake_claude(tmp_path: Path, monkeypatch) -> None:
+    """Put a scripted `claude` binary first on PATH for loop dispatch."""
+    bin_dir = tmp_path / "fakebin"
+    bin_dir.mkdir(exist_ok=True)
+    script = bin_dir / "claude"
+    script.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json\n"
+        'print(json.dumps({"type": "result", "result": "done"}))\n'
+    )
+    script.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
 
 
 def test_curator_cli_starts_with_version():
@@ -35,42 +100,122 @@ def test_bare_curator_opens_natural_language_shell(tmp_path, monkeypatch):
     result = runner.invoke(app, [], input="/quit\n")
 
     assert result.exit_code == 0
-    assert "Curator" in result.stdout
-    assert "Type what you want to work on" in result.stdout
+    assert "curator v0.1.0" in result.stdout
+    assert "Next:" in result.stdout
 
 
-def test_shell_natural_language_fast_path_starts_loop_immediately(tmp_path, monkeypatch):
-    """Verify small requests start and pause when no provider is configured."""
+def test_bare_curator_shows_banner_identity(tmp_path, monkeypatch):
+    """Verify startup prints the ASCII banner with version and path."""
+    runner = CliRunner()
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, [], input="/quit\n")
+
+    assert result.exit_code == 0
+    assert "curator v0.1.0" in result.stdout
+    assert "____" in result.stdout
+
+
+def test_shell_startup_preflight_can_be_forced(tmp_path, monkeypatch):
+    """Verify CURATOR_PREFLIGHT=force runs startup checks in pipes."""
+    runner = CliRunner()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("CURATOR_PREFLIGHT", "force")
+
+    result = runner.invoke(app, [], input="/quit\n")
+
+    assert result.exit_code == 0
+    assert "Preflight:" in result.stdout
+    assert "Python" in result.stdout
+
+
+def test_shell_doctor_command_renders_health_and_preflight(tmp_path, monkeypatch):
+    """Verify /doctor reports project health plus environment checks."""
+    runner = CliRunner()
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, [], input="/doctor\n/quit\n")
+
+    assert result.exit_code == 0
+    assert "Curator doctor" in result.stdout
+    assert "Preflight:" in result.stdout
+    assert "Recommended next step: /init" in result.stdout
+
+
+def test_curator_doctor_includes_preflight(tmp_path, monkeypatch):
+    """Verify the terminal doctor command appends the preflight report."""
+    runner = CliRunner()
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["doctor"])
+
+    assert result.exit_code == 0
+    assert "Preflight:" in result.stdout
+
+
+def test_shell_setup_mode_refuses_natural_language_without_writes(tmp_path, monkeypatch):
+    """Verify setup mode refuses to start loops and writes nothing to disk."""
     runner = CliRunner()
     monkeypatch.chdir(tmp_path)
 
     result = runner.invoke(app, [], input="Fix mobile login layout\n/quit\n")
 
     assert result.exit_code == 0
-    assert "Starting now: Fix mobile login layout" in result.stdout
-    assert "Decision: human_handoff" in result.stdout
-    assert "Start this loop?" not in result.stdout
-
-    import sqlite3
-
-    connection = sqlite3.connect(tmp_path / ".curator" / "curator.sqlite")
-    approval_row = connection.execute(
-        "select message from approval_decisions where approval_request_id = ?",
-        ("approval-goal-goal-fix-mobile-login-layout",),
-    ).fetchone()
-    connection.close()
-    assert approval_row is not None
-    assert approval_row[0] == "auto-accepted (fast path)"
+    assert "nothing was started or saved" in result.stdout
+    assert "/provider add claude-code" in result.stdout
+    assert "Starting now:" not in result.stdout
+    assert not (tmp_path / ".curator").exists()
 
 
-def test_shell_gate_mode_requires_proposal_review(tmp_path, monkeypatch):
-    """Verify /gate on restores the propose/confirm ceremony."""
+def test_shell_intercepts_terminal_command_input(tmp_path, monkeypatch):
+    """Verify the incident input gets a slash suggestion instead of a goal."""
     runner = CliRunner()
     monkeypatch.chdir(tmp_path)
 
     result = runner.invoke(
-        app, [], input="/gate on\nFix mobile login layout\n/quit\n"
+        app, [], input="curator provider add claude-code\n/quit\n"
     )
+
+    assert result.exit_code == 0
+    assert "not treated as a task" in result.stdout
+    assert "/provider add claude-code" in result.stdout
+    assert "Starting now:" not in result.stdout
+    assert "goal-curator-provider-add-claude-code" not in result.stdout
+    assert not (tmp_path / ".curator").exists()
+
+
+def test_shell_bare_yes_without_pending_proposal_is_guided(tmp_path, monkeypatch):
+    """Verify bare yes no longer resurrects old drafts or starts loops."""
+    runner = CliRunner()
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, [], input="yes\n/quit\n")
+
+    assert result.exit_code == 0
+    assert "No pending proposal" in result.stdout
+    assert "Starting now:" not in result.stdout
+    assert not (tmp_path / ".curator").exists()
+
+
+def test_shell_unknown_slash_command_suggests_nearest(tmp_path, monkeypatch):
+    """Verify a mistyped slash command gets a closest-match suggestion."""
+    runner = CliRunner()
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, [], input="/provder add claude-code\n/quit\n")
+
+    assert result.exit_code == 0
+    assert "Unknown command" in result.stdout
+    assert "/provider" in result.stdout
+
+
+def test_shell_live_mode_defaults_to_proposal_review(tmp_path, monkeypatch):
+    """Verify live-mode requests get the propose/confirm ceremony by default."""
+    runner = CliRunner()
+    monkeypatch.chdir(tmp_path)
+    _enable_live_mode(tmp_path)
+
+    result = runner.invoke(app, [], input="Fix mobile login layout\n/quit\n")
 
     assert result.exit_code == 0
     assert "PM drafted a goal contract:" in result.stdout
@@ -78,15 +223,32 @@ def test_shell_gate_mode_requires_proposal_review(tmp_path, monkeypatch):
     assert "Starting now:" not in result.stdout
 
 
+def test_shell_gate_off_restores_fast_path(tmp_path, monkeypatch):
+    """Verify /gate off is an explicit opt-in back into auto-start."""
+    runner = CliRunner()
+    monkeypatch.chdir(tmp_path)
+    _enable_live_mode(tmp_path)
+    _install_fake_claude(tmp_path, monkeypatch)
+
+    result = runner.invoke(
+        app, [], input="/gate off\nFix mobile login layout\n/quit\n"
+    )
+
+    assert result.exit_code == 0
+    assert "Starting now: Fix mobile login layout" in result.stdout
+    assert "Start this loop?" not in result.stdout
+
+
 def test_shell_edit_updates_constraints_without_starting_loop(tmp_path, monkeypatch):
     """Verify shell edits append proposal constraints before loop execution."""
     runner = CliRunner()
     monkeypatch.chdir(tmp_path)
+    _enable_live_mode(tmp_path)
 
     result = runner.invoke(
         app,
         [],
-        input="/gate on\nFix mobile login layout\nedit Do not change auth flow\n/quit\n",
+        input="Fix mobile login layout\nedit Do not change auth flow\n/quit\n",
     )
 
     assert result.exit_code == 0
@@ -98,12 +260,12 @@ def test_shell_edit_summary_rewrites_proposal(tmp_path, monkeypatch):
     """Verify edit summary rewrites the proposal summary instead of appending."""
     runner = CliRunner()
     monkeypatch.chdir(tmp_path)
+    _enable_live_mode(tmp_path)
 
     result = runner.invoke(
         app,
         [],
         input=(
-            "/gate on\n"
             "Fix mobile login layout\n"
             "edit summary Fix responsive login layout on mobile\n"
             "/quit\n"
@@ -118,9 +280,11 @@ def test_shell_yes_accepts_goal_starts_loop_and_stores_run(tmp_path, monkeypatch
     """Verify accepted shell proposals run the loop and persist goal linkage."""
     runner = CliRunner()
     monkeypatch.chdir(tmp_path)
+    _enable_live_mode(tmp_path)
+    _install_fake_claude(tmp_path, monkeypatch)
 
     result = runner.invoke(
-        app, [], input="/gate on\nFix mobile login layout\nyes\n/quit\n"
+        app, [], input="Fix mobile login layout\nyes\n/quit\n"
     )
 
     assert result.exit_code == 0
@@ -138,27 +302,27 @@ def test_shell_slash_commands_render_project_views(tmp_path, monkeypatch):
     result = runner.invoke(
         app,
         [],
-        input="/status\n/validate\nFix mobile login layout\n/node list\n/node current\n/quit\n",
+        input="/status\n/validate\n/node list\n/node current\n/quit\n",
     )
 
     assert result.exit_code == 0
     assert "Curator status" in result.stdout
     assert "Curator contract validate" in result.stdout
-    assert "Session:" in result.stdout
-    assert "Nodes:" in result.stdout
-    assert "Node:" in result.stdout
+    assert "No nodes yet" in result.stdout
+    assert "No node yet" in result.stdout
 
 
 def test_shell_runtime_workbench_commands_are_user_visible(tmp_path, monkeypatch):
     """Verify runtime readiness commands render through the real shell entrypoint."""
     runner = CliRunner()
     monkeypatch.chdir(tmp_path)
+    _enable_live_mode(tmp_path)
+    _install_fake_claude(tmp_path, monkeypatch)
 
     result = runner.invoke(
         app,
         [],
         input=(
-            "/gate on\n"
             "Fix mobile login layout\n"
             "/agents\n"
             "/workbench\n"
@@ -232,7 +396,9 @@ def test_curator_status_reports_initialized_project(tmp_path, monkeypatch):
     """Verify status reports initialized project state and session counts."""
     runner = CliRunner()
     monkeypatch.chdir(tmp_path)
-    runner.invoke(app, [], input="Fix mobile login layout\n/quit\n")
+    _enable_live_mode(tmp_path)
+    _install_fake_claude(tmp_path, monkeypatch)
+    runner.invoke(app, [], input="Fix mobile login layout\nyes\n/quit\n")
 
     result = runner.invoke(app, ["status"])
 
@@ -341,14 +507,13 @@ def test_pyproject_declares_build_system():
 
 
 def test_shell_welcome_banner_shows_mode_and_next_action(tmp_path, monkeypatch):
-    """Verify the shell banner states the execution mode and one next action."""
+    """Verify the shell states the mode via its prompt and one next action."""
     runner = CliRunner()
     monkeypatch.chdir(tmp_path)
 
     result = runner.invoke(app, [], input="/quit\n")
 
     assert result.exit_code == 0
-    assert "Mode: setup" in result.stdout
     assert "Next:" in result.stdout
     assert "(setup) >" in result.stdout
 

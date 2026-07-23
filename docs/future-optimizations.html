@@ -3,357 +3,239 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Curator Future Optimizations</title>
-  <style>
-    :root {
-      color-scheme: dark;
-      --bg: #070a12;
-      --panel: #0e1422;
-      --panel-2: #121a2b;
-      --text: #e8edf7;
-      --muted: #aab6ca;
-      --heading: #ffffff;
-      --border: #253147;
-      --accent: #7dd3fc;
-      --accent-2: #a7f3d0;
-      --code-bg: #050812;
-    }
-    body {
-      max-width: 1120px;
-      margin: 0 auto;
-      padding: 42px 24px 80px;
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      color: var(--text);
-      background: var(--bg);
-      line-height: 1.65;
-    }
-    article {
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 28px;
-    }
-    h1, h2, h3 {
-      color: var(--heading);
-      line-height: 1.18;
-    }
-    h1 {
-      font-size: 40px;
-      margin: 0 0 12px;
-    }
-    h2 {
-      margin-top: 38px;
-      padding-bottom: 8px;
-      border-bottom: 1px solid var(--border);
-    }
-    h3 {
-      margin-top: 24px;
-    }
-    p, li, td {
-      color: var(--text);
-    }
-    .muted {
-      color: var(--muted);
-    }
-    strong {
-      color: var(--heading);
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 18px 0;
-      background: var(--panel-2);
-    }
-    th, td {
-      padding: 12px;
-      border: 1px solid var(--border);
-      vertical-align: top;
-      text-align: left;
-    }
-    th {
-      color: var(--heading);
-      background: #182238;
-    }
-    code, pre {
-      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-    }
-    code {
-      padding: 2px 5px;
-      border-radius: 4px;
-      color: var(--accent-2);
-      background: #111827;
-    }
-    pre {
-      overflow-x: auto;
-      padding: 16px;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      color: #edf5ff;
-      background: var(--code-bg);
-      font-size: 13px;
-    }
-    .callout {
-      margin: 18px 0;
-      padding: 14px 16px;
-      border: 1px solid #315f7a;
-      border-radius: 8px;
-      background: #0b2233;
-    }
-  </style>
+  <title>Curator · Future Optimizations</title>
+  <link rel="stylesheet" href="assets/curator-docs.css" />
 </head>
-<body>
-  <article>
-    <header>
-      <h1>Curator Future Optimizations</h1>
-      <p class="muted">
-        This document tracks future optimization directions for Curator after the real
-        provider runtime foundation. It preserves architecture context, trade-offs, and
-        research questions without turning them into immediate implementation scope.
-      </p>
-    </header>
+<body id="top">
 
-    <section id="what">
-      <h2>What</h2>
-      <p>
-        Curator P0 now proves local init, durable loop ledger storage, typed provider
-        outputs, provider run attribution, context packages, a harness boundary,
-        deterministic runtime decisions, QA fail retry, pause/resume records, action
-        approval gates, provider profile readiness, unique workflow run ids, a runtime
-        workspace, and snapshot-based Textual panels. Future work should evolve this into
-        a runtime layer that can compile, schedule, dispatch, observe, evaluate, route,
-        revise graphs, and commit durable state around real providers.
-      </p>
-      <p>
-        The north star is not only "multi-agent chat." It is an evidence-driven runtime
-        kernel for agent work:
-      </p>
-      <pre><code>Observe
-  -> collect evidence
-  -> evaluate against contracts, policy, budget, and ownership
-  -> choose route
-  -> dispatch the next role/provider
-  -> commit durable state
-  -> expose an inspectable snapshot</code></pre>
-    </section>
+  <header class="masthead">
+    <a class="wordmark" href="#top"><span class="loop">↻</span><span class="name">Curator</span></a>
+    <span class="mast-spacer"></span>
+    <div class="phase-legend">
+      <span class="chip live">Live · Phase 0</span>
+      <span class="chip target">Target · V1</span>
+    </div>
+  </header>
 
-    <section id="why">
-      <h2>Why</h2>
-      <p>
-        Loop engineering is useful, but static happy-path workflows are not enough for
-        real software work. Real runs fail, discover missing scope, need reviewer
-        routing, encounter policy limits, require human approval, and must recover after
-        interruption. Without a durable control layer, those decisions become implicit in
-        chat history or provider behavior.
+  <main class="page">
+    <div class="doc-head">
+      <span class="eyebrow">Roadmap · Runtime kernel</span>
+      <h1>Future optimizations</h1>
+      <p class="dek">
+        The north star is not "multi-agent chat." It is an <strong>evidence-driven runtime
+        kernel</strong> for agent work — observe, evaluate, route, dispatch, commit, expose —
+        with decision authority kept outside the providers. This document tracks that backlog
+        without turning it into immediate scope.
       </p>
+    </div>
+
+    <figure class="figure">
+      <div class="mermaid">
+flowchart LR
+  O["Observe"]:::live --> E["Collect evidence"]:::verify --> V["Evaluate<br/><small>contracts · policy · budget · ownership</small>"]:::review --> C["Choose route"]:::review --> D["Dispatch role / provider"]:::live --> M["Commit durable state"]:::verify --> S["Expose snapshot"]:::gate --> O
+  classDef live fill:#0e1a33,stroke:#3b8cff,stroke-width:1.5px,color:#eaf1ff;
+  classDef verify fill:#0c2318,stroke:#43e2a4,stroke-width:1.5px,color:#d6ffe9;
+  classDef review fill:#170f2e,stroke:#8b5cf6,stroke-width:1.5px,color:#ece3ff;
+  classDef gate fill:#241a06,stroke:#ffc24b,stroke-width:1.5px,color:#ffe9bf;
+      </div>
+      <div class="figure-cap"><b>Figure 1.</b><span>The runtime decision kernel — a loop, not a static happy path.</span></div>
+    </figure>
+
+    <section class="sec" id="what">
+      <div class="sec-eyebrow"><span class="mark">W</span> What</div>
+      <h2>From a proven Phase 0 to a runtime layer</h2>
       <p>
-        Curator should keep decision authority outside providers. Providers can execute
-        bounded role work, but Curator should own evidence requirements, runtime
-        decisions, retry policy, graph revision, memory updates, and user-visible audit
-        trails.
+        Curator P0 now proves local init, durable loop ledger storage, typed provider outputs,
+        provider run attribution, context packages, a harness boundary, deterministic runtime
+        decisions, QA-fail retry, pause/resume records, action approval gates, provider profile
+        readiness, unique workflow run ids, a runtime workspace, and snapshot-based Textual
+        panels. Future work should evolve this into a runtime layer that can compile, schedule,
+        dispatch, observe, evaluate, route, revise graphs, and commit durable state around real
+        providers — the loop in Figure 1.
       </p>
     </section>
 
-    <section id="how">
-      <h2>How</h2>
+    <section class="sec" id="why">
+      <div class="sec-eyebrow"><span class="mark">Y</span> Why</div>
+      <h2>Static happy paths are not enough</h2>
       <p>
-        Treat each category as a backlog and research track. Before implementing an item,
-        convert it into a focused design document and implementation plan. Avoid bundling
-        unrelated runtime work into one phase.
+        Loop engineering is useful, but static happy-path workflows are not enough for real
+        software work. Real runs fail, discover missing scope, need reviewer routing, encounter
+        policy limits, require human approval, and must recover after interruption. Without a
+        durable control layer, those decisions become implicit in chat history or provider
+        behavior.
+      </p>
+      <p>
+        Curator should keep decision authority outside providers. Providers can execute bounded
+        role work, but Curator should own evidence requirements, runtime decisions, retry
+        policy, graph revision, memory updates, and user-visible audit trails.
+      </p>
+    </section>
+
+    <section class="sec" id="how">
+      <div class="sec-eyebrow"><span class="mark">H</span> How</div>
+      <h2>Treat each category as a research track</h2>
+      <p>
+        Before implementing an item, convert it into a focused design document and
+        implementation plan. Avoid bundling unrelated runtime work into one phase.
       </p>
       <div class="callout">
-        <strong>Scope guard:</strong> real provider execution, runtime dynamic role
-        dispatch, executable graph revision, ownership, parallel work, memory learning,
-        and skill runtime are P1/MVP tracks. P0 already has durable pause records,
-        resume events, scope-change draft creation, provider profile records, and action
-        approval gates; those foundations should be extended rather than redesigned.
+        <strong>Scope guard:</strong> the current v0-alpha release remains a local,
+        single-writer workflow. The blueprint is the V1 target — Project/Session/Goal/Task
+        DAGs, Agent and AgentRuntime separation, Provider/Capability registry, append-only
+        events, artifacts and memory manifests, leases/heartbeats, native provider TUI
+        integration, runtime handoff, and bounded parallel workers. These must be documented as
+        migration tracks until the repository implements them; the v0-alpha docs must not imply
+        that they already exist.
+      </div>
+
+      <h3>Optimization categories</h3>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>Category</th><th>Future direction</th><th>Research questions</th><th>Trade-offs</th></tr></thead>
+          <tbody>
+            <tr><td>Runtime Evaluator</td><td>Evaluate evidence against done criteria, contracts, risk, budget, and approval rules.</td><td>Which checks are objective gates, and which need an agent critic? How is confidence represented?</td><td>Improves correctness, but adds complexity and must remain explainable.</td></tr>
+            <tr><td>Runtime Role Dispatch</td><td>Select the next role from evidence and failure state, not only compile-time task signals.</td><td>When should QA, security, release, PM, or human review be selected dynamically?</td><td>Enables adaptive workflows, but can create surprising routes without clear audit records.</td></tr>
+            <tr><td>Graph Revision</td><td>Promote paused scope-change drafts into accepted revisions and executable scheduler paths.</td><td>Which completed tasks are inherited? What needs approval? How is impact previewed?</td><td>Essential for autonomy, but risky without strong review UX.</td></tr>
+            <tr><td>Ownership Model</td><td>Track ownership of tasks, evidence, files, worktrees, failures, and decisions.</td><td>Who owns a failed diff? Which role retries? How are reviewer findings assigned?</td><td>Needed before parallel work, but too heavy for the current single-writer runtime.</td></tr>
+            <tr><td>Durable Recovery</td><td>Turn durable resume events into safe continuation, rerun, or cancellation behavior.</td><td>What resumes from SQLite? What reruns? How are provider-native sessions reconciled?</td><td>Raises reliability, but provider-specific behavior will shape the design.</td></tr>
+            <tr><td>Parallel Scheduling</td><td>Run independent tasks concurrently after ownership and conflict rules exist.</td><td>How are worktrees isolated? How are patches merged? Which QA validates combined output?</td><td>Improves throughput, but multiplies merge, routing, and recovery complexity.</td></tr>
+            <tr><td>Provider Adapters</td><td>Connect Codex and Claude Code through bounded harness runs, context packages, action policies, and profiles.</td><td>Which outputs are machine-readable? How are permissions, tools, MCP servers, and artifacts mapped?</td><td>Required for MVP value, but must not compromise Curator-owned state boundaries.</td></tr>
+            <tr><td>Agent Memory</td><td>Evolve project, role, session, and learning memory into evidence-backed state.</td><td>What becomes long-term fact? What stays session summary? How are stale facts corrected?</td><td>Improves future loops, but bad memory can permanently degrade behavior.</td></tr>
+            <tr><td>Learning Patches</td><td>Generate reviewable proposals to update memory, skills, hooks, or templates after repeated failures.</td><td>What evidence is required before proposing a patch? Which patches require approval?</td><td>Turns experience into improvement, but automatic mutation is unsafe.</td></tr>
+            <tr><td>Skills / Capability Packs</td><td>Load reusable operating manuals such as CI triage, security review, or release checklist.</td><td>Which skills are packaged, project-defined, or learning-patch-proposed?</td><td>Strengthens agents without retraining, but stale guidance and injection risks remain.</td></tr>
+            <tr><td>Hooks</td><td>Add controlled hook points such as before_run, after_run, on_failure, on_evidence, on_stop.</td><td>Which hooks are safe? How are side effects audited? Can hooks be disabled per project?</td><td>Improves extensibility, but can become hidden control flow if not governed.</td></tr>
+            <tr><td>Security / Policy Kernel</td><td>Extend action policy from file/shell/remote-VCS gates into network, credentials, dependency install, and merge permissions.</td><td>How are remembered permissions scoped? How is risk displayed? Which approvals expire?</td><td>Security is core to trust, but too much policy early slows development.</td></tr>
+            <tr><td>Observability</td><td>Extend the workbench with timeline, decisions, provider streams, usage, failures, and memory patches.</td><td>What is visible by default? What is expandable? How is a failed loop inspected fast?</td><td>Improves trust and debugging, but too much UI detail overwhelms users.</td></tr>
+          </tbody>
+        </table>
       </div>
     </section>
 
-    <section id="roadmap">
-      <h2>Optimization Categories</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>Category</th>
-            <th>Future Direction</th>
-            <th>Research Questions</th>
-            <th>Trade-offs</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>Runtime Evaluator</td>
-            <td>Evaluate evidence against done criteria, contracts, risk, budget, and approval rules.</td>
-            <td>Which checks are objective gates, and which require an agent critic? How should confidence be represented?</td>
-            <td>Improves correctness, but adds complexity and must remain explainable.</td>
-          </tr>
-          <tr>
-            <td>Runtime Role Dispatch</td>
-            <td>Select the next role from evidence and failure state, not only compile-time task signals.</td>
-            <td>When should QA, security, release, PM, or human review be selected dynamically?</td>
-            <td>Enables adaptive workflows, but can create surprising routes without clear audit records.</td>
-          </tr>
-          <tr>
-            <td>Graph Revision</td>
-            <td>Promote paused scope-change drafts into accepted revisions and executable scheduler paths.</td>
-            <td>Which completed tasks are inherited? What requires user approval? How is impact previewed before acceptance?</td>
-            <td>Essential for autonomy, but risky without strong review UX.</td>
-          </tr>
-          <tr>
-            <td>Ownership Model</td>
-            <td>Track ownership of tasks, evidence, files, worktrees, failures, and decisions.</td>
-            <td>Who owns a failed diff? Which role retries? How are reviewer findings assigned?</td>
-            <td>Needed before parallel work, but too heavy for the current single-writer runtime.</td>
-          </tr>
-          <tr>
-            <td>Durable Recovery</td>
-            <td>Turn durable resume events into safe continuation, rerun, or cancellation behavior.</td>
-            <td>What should resume from SQLite? What should rerun? How are provider-native sessions and context packages reconciled?</td>
-            <td>Raises reliability, but provider-specific behavior will shape the design.</td>
-          </tr>
-          <tr>
-            <td>Parallel Scheduling</td>
-            <td>Run independent tasks concurrently after ownership and conflict rules exist.</td>
-            <td>How are worktrees isolated? How are patches merged? Which QA validates combined output?</td>
-            <td>Improves throughput, but multiplies merge, routing, and recovery complexity.</td>
-          </tr>
-          <tr>
-            <td>Provider Adapters</td>
-            <td>Connect Codex and Claude Code through bounded harness runs, context packages, action policies, provider profiles, and capability manifests.</td>
-            <td>Which outputs are machine-readable? How are permissions, tools, MCP servers, and artifacts mapped?</td>
-            <td>Required for MVP value, but must not compromise Curator-owned state boundaries.</td>
-          </tr>
-          <tr>
-            <td>Agent Memory</td>
-            <td>Evolve project, role, session, and learning memory into evidence-backed state.</td>
-            <td>What becomes long-term fact? What remains session summary? How are stale facts corrected?</td>
-            <td>Improves future loops, but bad memory can permanently degrade behavior.</td>
-          </tr>
-          <tr>
-            <td>Learning Patches</td>
-            <td>Generate reviewable proposals to update memory, skills, hooks, or templates after repeated failures.</td>
-            <td>What evidence is required before proposing a patch? Which patches require approval?</td>
-            <td>Turns execution experience into improvement, but automatic mutation is unsafe.</td>
-          </tr>
-          <tr>
-            <td>Skills / Capability Packs</td>
-            <td>Load reusable operating manuals such as CI triage, security review, OAuth validation, or release checklist.</td>
-            <td>Which skills are packaged, project-defined, or learning-patch-proposed?</td>
-            <td>Strengthens agents without retraining, but stale guidance and injection risks remain.</td>
-          </tr>
-          <tr>
-            <td>Hooks</td>
-            <td>Add controlled hook points such as before_run, after_run, on_failure, on_evidence, and on_stop.</td>
-            <td>Which hooks are safe? How are side effects audited? Can hooks be disabled per project?</td>
-            <td>Improves extensibility, but can become hidden control flow if not governed.</td>
-          </tr>
-          <tr>
-            <td>Security / Policy Kernel</td>
-            <td>Extend the current action policy from file/shell/remote VCS gates into network, credentials, dependency install, and merge permissions.</td>
-            <td>How are remembered permissions scoped? How is risk displayed to the user? Which approvals can expire?</td>
-            <td>Security is core to trust, but too much policy early can slow development.</td>
-          </tr>
-          <tr>
-            <td>Observability</td>
-            <td>Extend the current workbench and snapshot panels with timeline, decisions, provider streams, usage, failures, and memory patches.</td>
-            <td>What is visible by default? What is expandable? How does a user inspect a failed loop quickly?</td>
-            <td>Improves trust and debugging, but too much UI detail can overwhelm users.</td>
-          </tr>
-        </tbody>
-      </table>
-    </section>
-
-    <section id="memory">
-      <h2>Agent Memory Optimization</h2>
+    <section class="sec" id="parallel-worktrees">
+      <div class="sec-eyebrow"><span class="mark">P</span> Parallel agents</div>
+      <h2>Multi-worktree parallel execution</h2>
       <p>
-        Agent memory should not become unreviewed chatbot memory. It should be
-        evidence-backed project state that improves future loops while remaining
-        inspectable, editable, and reversible.
+        Phase 0 protects the single project directory with a <strong>clean baseline + project
+        lock</strong>: the writer's first dispatch refuses a dirty tree, and a global
+        <code>fcntl</code> lock enforces exactly one writer per project. That guard exists so the
+        <code>git diff HEAD</code> Curator SHA-256-hashes as tamper-evident evidence is
+        attributable to one writer. It is a single-writer stopgap — <em>not</em> scaffolding for
+        parallelism. The V1 Workspace/Worktree model <strong>supersedes</strong> it.
       </p>
-      <pre><code>Memory layers
-  Project memory
-    - what the project is
-    - architecture facts
-    - stable commands
-
-  Role memory
-    - role-specific lessons
-    - user corrections for that role
-    - common mistakes
-
-  Session memory
-    - what happened in one loop
-    - evidence and decisions
-    - final summary
-
-  Learning patches
-    - proposed updates from repeated failures
-    - require approval before long-term write
-
-  Skill memory
-    - reusable operating manuals
-    - versioned through reviewable patches</code></pre>
+      <p>
+        The direction: give every parallel agent its <strong>own git worktree and branch, forked
+        from a recorded base commit SHA</strong>. Capture each agent's evidence as
+        <code>git diff &lt;baseSHA&gt;</code> <em>inside</em> that worktree — not
+        <code>git diff HEAD</code> — and store the base SHA alongside the content hash. This keeps
+        the tamper-evident guarantee (arguably strengthens it): each diff is complete
+        (covers committed <em>and</em> uncommitted agent work), attributable for free
+        (branch = agent = writer), revertable for free (drop the branch/worktree), and independently
+        reproducible from repo state. Cross-agent write races disappear, so the clean-tree guard is
+        no longer needed once worktrees exist.
+      </p>
+      <p>
+        This is the convergent industry answer. <strong>Claude Code</strong> runs parallel sessions
+        and <code>isolation: worktree</code> sub-agents in per-session worktrees under
+        <code>.claude/worktrees/&lt;session-id&gt;/</code> and imposes no clean-tree requirement.
+        <strong>Orca</strong> (Stably AI) is worktree-native: each task gets a worktree + branch
+        forked from a committed start-from ref, sidestepping the dirty-tree problem by isolation
+        rather than a gate. Both avoid the clean-tree requirement precisely because each agent
+        branches from a committed ref.
+      </p>
+      <h3>Isolation substrate — why worktrees, not the alternatives</h3>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>Substrate</th><th>Attribution</th><th>Evidence integrity</th><th>Verdict</th></tr></thead>
+          <tbody>
+            <tr><td>Worktree + branch per agent, diff vs recorded base SHA</td><td>Free — branch = agent</td><td>Complete, reproducible from repo state; strengthens the SHA-256 hash</td><td><strong>Chosen</strong> — the V1 substrate.</td></tr>
+            <tr><td>Ephemeral branch in one serialized tree</td><td>Per-commit</td><td>Fine, but one working tree kills real parallelism</td><td>Acceptable only for tiny N.</td></tr>
+            <tr><td>VM / container per agent (Devin, OpenHands)</td><td>Per-branch / PR</td><td>Same git story as worktrees</td><td>Overkill locally; revisit only for remote/cloud execution.</td></tr>
+            <tr><td>Content snapshot outside git (Cursor / Aider checkpoints)</td><td>Snapshot boundary</td><td>Lives outside git, not reproducible from repo state — hashing a blob is weaker than a canonical diff</td><td>Avoid as substrate; fine as revert-UX only.</td></tr>
+            <tr><td>Auto-stash around the agent</td><td>None</td><td>Non-deterministic; <code>stash pop</code> conflicts; no branch identity</td><td>Avoid — directly undermines a clean per-agent diff.</td></tr>
+          </tbody>
+        </table>
+      </div>
       <div class="callout">
-        <strong>Design rule:</strong> execution can propose memory changes, but it should
-        not silently rewrite long-term memory. Evidence links and approval gates are
-        required for durable memory updates.
+        <strong>Phase 0 bridge (shipped in v0.1.0):</strong> the clean-tree guard stays, but the
+        dirty pause now offers an opt-in convenience — <code>/resume stash</code> tucks the user's
+        uncommitted work into a git stash so the writer runs on a clean baseline (restore later with
+        <code>git stash pop</code>), plus a clearer pause card explaining the choice. This is a
+        single-writer dogfooding convenience, <em>not</em> the isolation substrate; it deliberately
+        does not auto-pop (auto-pop risks a mid-loop merge conflict) and does not touch worktrees.
+        The reserved <code>.curator/worktrees/</code> path is the only forward hook in code today.
       </div>
     </section>
 
-    <section id="research">
-      <h2>Research Tracks</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>Track</th>
-            <th>What To Study</th>
-            <th>Reason</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>LangGraph</td>
-            <td>Graph runtime, checkpoints, conditional edges, interrupts, subgraphs, memory.</td>
-            <td>Closest reference for dynamic routing and human-in-the-loop agent graph execution.</td>
-          </tr>
-          <tr>
-            <td>Temporal</td>
-            <td>Durable execution, retry, timeout, recovery, workflow/activity split.</td>
-            <td>Strong reference for reliable runtime mechanics, even though it is not agent-aware.</td>
-          </tr>
-          <tr>
-            <td>CrewAI Flow</td>
-            <td>Events, conditions, branching, retries, role-oriented workflows.</td>
-            <td>Useful comparison for agent workflow ergonomics.</td>
-          </tr>
-          <tr>
-            <td>AG2 / AutoGen</td>
-            <td>Multi-agent conversation routing, critic loops, agent-to-agent patterns.</td>
-            <td>Useful for conversation loops, but less reliable for evidence-driven state control.</td>
-          </tr>
-          <tr>
-            <td>OpenAI Agents SDK</td>
-            <td>Handoffs, guardrails, tool calls, tracing, agent orchestration surfaces.</td>
-            <td>Relevant for future provider and agent integration patterns.</td>
-          </tr>
-          <tr>
-            <td>Loop Engineering</td>
-            <td>Verifier, stop rule, retry policy, topology, observability, budget, feedback loops.</td>
-            <td>Useful framing for why Curator needs runtime decisions rather than static workflows.</td>
-          </tr>
-        </tbody>
-      </table>
+    <section class="sec" id="memory">
+      <div class="sec-eyebrow"><span class="mark">H</span> Agent memory</div>
+      <h2>Evidence-backed, not chatbot memory</h2>
+      <p>
+        Agent memory should be evidence-backed project state that improves future loops while
+        remaining inspectable, editable, and reversible — never unreviewed chatbot memory.
+      </p>
+      <figure class="figure">
+        <div class="mermaid">
+flowchart LR
+  X["Execution evidence"]:::verify --> G{"proposes update"}:::gate
+  G -- "approval + evidence" --> D[("Durable memory<br/><small>project · role · skill</small>")]:::ledger
+  G -. "no approval" .-> Sm["Session memory<br/><small>ephemeral loop summary</small>"]:::live
+  classDef live fill:#0e1a33,stroke:#3b8cff,stroke-width:1.5px,color:#eaf1ff;
+  classDef verify fill:#0c2318,stroke:#43e2a4,stroke-width:1.5px,color:#d6ffe9;
+  classDef gate fill:#241a06,stroke:#ffc24b,stroke-width:1.5px,color:#ffe9bf;
+  classDef ledger fill:#0a0f1f,stroke:#33406a,stroke-width:1.4px,color:#9fb0d6;
+        </div>
+        <div class="figure-cap"><b>Figure 2.</b><span>Execution can propose memory changes, but durable writes require evidence and an approval gate.</span></div>
+      </figure>
     </section>
 
-    <section id="future-considerations">
-      <h2>Future improvements/considerations/trade-offs</h2>
+    <section class="sec" id="research">
+      <div class="sec-eyebrow"><span class="mark">H</span> Research tracks</div>
+      <h2>What to study, and why</h2>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>Track</th><th>What to study</th><th>Reason</th></tr></thead>
+          <tbody>
+            <tr><td>LangGraph</td><td>Graph runtime, checkpoints, conditional edges, interrupts, subgraphs, memory.</td><td>Closest reference for dynamic routing and human-in-the-loop agent graphs.</td></tr>
+            <tr><td>Temporal</td><td>Durable execution, retry, timeout, recovery, workflow/activity split.</td><td>Strong reference for reliable runtime mechanics, even though not agent-aware.</td></tr>
+            <tr><td>CrewAI Flow</td><td>Events, conditions, branching, retries, role-oriented workflows.</td><td>Useful comparison for agent workflow ergonomics.</td></tr>
+            <tr><td>AG2 / AutoGen</td><td>Multi-agent conversation routing, critic loops, agent-to-agent patterns.</td><td>Useful for conversation loops, less so for evidence-driven state control.</td></tr>
+            <tr><td>OpenAI Agents SDK</td><td>Handoffs, guardrails, tool calls, tracing, orchestration surfaces.</td><td>Relevant for future provider and agent integration patterns.</td></tr>
+            <tr><td>Loop Engineering</td><td>Verifier, stop rule, retry policy, topology, observability, budget, feedback loops.</td><td>Frames why Curator needs runtime decisions rather than static workflows.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="sec" id="future">
+      <div class="sec-eyebrow"><span class="mark">F</span> Future · considerations · trade-offs</div>
+      <h2>Keep the path, not the framework</h2>
       <p>
-        Curator should not blindly copy an existing framework. The product opportunity
-        is the runtime decision layer and the evidence ledger around it. The near-term
-        implementation should stay small, but the architecture should preserve the path
-        from single-writer orchestration to richer real provider scheduling.
+        Curator should not blindly copy an existing framework. The product opportunity is the
+        runtime decision layer and the evidence ledger around it. The near-term implementation
+        should stay small, but the architecture should preserve the path from single-writer
+        orchestration to richer real-provider scheduling.
       </p>
     </section>
-  </article>
+  </main>
+
+  <footer class="doc-foot">
+    <div class="foot-eyebrow">Curator documentation</div>
+    <nav class="doc-index">
+      <a href="orchestration.html"><span class="di-title">Orchestration &amp; runtime boundary</span><span class="di-desc">The Phase 0 control loop and the V1 blueprint boundary.</span></a>
+      <a href="provider-profile-layer.html"><span class="di-title">Provider &amp; runtime identity</span><span class="di-desc">Agent, Provider, AgentRuntime, and Execution.</span></a>
+      <a href="runtime-workspace-ui.html"><span class="di-title">Runtime workspace UI</span><span class="di-desc">The workbench today, the Control Desk target.</span></a>
+      <a href="shell-adapter-boundary.html"><span class="di-title">Shell adapter boundary</span><span class="di-desc">What shell may do vs the Python control plane.</span></a>
+      <a class="current" href="future-optimizations.html"><span class="di-title">Future optimizations</span><span class="di-desc">The evidence-driven runtime kernel backlog.</span></a>
+      <a href="v0-alpha-release-plan-v3.html"><span class="di-title">v0.1.0 release plan (v3)</span><span class="di-desc">Release gates and the V1.1–V1.6 ladder.</span></a>
+      <a href="v0-alpha-implementation-status.html"><span class="di-title">Implementation status</span><span class="di-desc">What PR1–PR5 actually landed.</span></a>
+      <a href="release-notes-v0.1.0.html"><span class="di-title">v0.1.0 release notes</span><span class="di-desc">What ships, and the known limits.</span></a>
+      <a href="orca-parallel-orchestration-and-task-memory.html"><span class="di-title">Parallel orchestration &amp; task memory</span><span class="di-desc">Orca's parallelism as evidence-backed state.</span></a>
+    </nav>
+    <div class="foot-meta"><span class="chip live">Phase 0</span> local · single-writer · sequential — the V1 blueprint is a migration target, not current capability.</div>
+  </footer>
+
+  <script src="assets/mermaid.min.js"></script>
+  <script src="assets/curator-mermaid.js"></script>
 </body>
 </html>

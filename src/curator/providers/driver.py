@@ -1,8 +1,11 @@
 """Drive providers asynchronously with streaming events and cancellation."""
 
 import asyncio
+from contextlib import suppress
 import json
+import os
 from pathlib import Path
+import signal
 from typing import Protocol
 
 from curator.core.enums import ProviderErrorKind, ProviderName
@@ -21,6 +24,12 @@ from curator.providers.events import (
 
 DEFAULT_RUN_TIMEOUT_SECONDS = 1800
 _TERMINATE_GRACE_SECONDS = 5
+# asyncio's StreamReader defaults to a 64 KiB line limit; a single provider JSONL event
+# (a large diff, tool output, or a review that inlines the change) routinely exceeds that,
+# and readline() then raises ValueError("Separator is not found, and chunk exceeds the
+# limit"), failing the run as a bogus "invalid output". Give the reader generous headroom
+# so a big-but-ordinary line streams through instead of crashing the provider run.
+_STREAM_READER_LIMIT = 16 * 1024 * 1024
 
 
 class ProviderDriver(Protocol):
@@ -77,7 +86,14 @@ class LegacyProviderDriver:
     ) -> RoleOutput | ProviderRunResponse:
         """Run the wrapped provider and emit synthetic lifecycle events."""
         _ = request
-        _emit(on_event, ProviderEventKind.STARTED, spec.id, 0, label=spec.role.value)
+        _emit(
+            on_event,
+            ProviderEventKind.STARTED,
+            spec.id,
+            0,
+            label=spec.role.value,
+            payload={"provider": self.provider_name.value},
+        )
         try:
             output = self.provider.run(spec)
         except Exception:
@@ -110,6 +126,11 @@ class SubprocessDriver:
     def build_argv(self, spec: HarnessRunSpec, request: ProviderRunRequest) -> list[str]:
         """Return the subprocess argv for one provider run."""
         raise NotImplementedError
+
+    def build_prompt(self, spec: HarnessRunSpec, request: ProviderRunRequest) -> str:
+        """Return the prompt to send through stdin instead of process argv."""
+        _ = spec, request
+        return ""
 
     def parse_event(
         self, line: str, provider_run_id: str, sequence: int
@@ -144,11 +165,15 @@ class SubprocessDriver:
         """Terminate a subprocess, escalating to kill after a grace period."""
         if process.returncode is not None:
             return
-        process.terminate()
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
         try:
             await asyncio.wait_for(process.wait(), timeout=_TERMINATE_GRACE_SECONDS)
         except TimeoutError:
-            process.kill()
+            with suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
             await process.wait()
 
     async def run(
@@ -159,15 +184,26 @@ class SubprocessDriver:
     ) -> ProviderRunResponse:
         """Spawn the provider CLI and stream its JSONL events."""
         argv = self.build_argv(spec, request)
+        prompt = self.build_prompt(spec, request)
         process = await asyncio.create_subprocess_exec(
             *argv,
             cwd=self.project_root,
+            stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
+            limit=_STREAM_READER_LIMIT,
         )
         events: list[ProviderEvent] = []
         sequence = 0
-        _emit(on_event, ProviderEventKind.STARTED, spec.id, sequence, label=" ".join(argv[:2]))
+        _emit(
+            on_event,
+            ProviderEventKind.STARTED,
+            spec.id,
+            sequence,
+            label=" ".join(argv[:2]),
+            payload={"provider": self.provider_name.value},
+        )
 
         async def _read_stdout() -> None:
             """Read provider stdout lines and emit parsed provider events."""
@@ -192,10 +228,31 @@ class SubprocessDriver:
             assert process.stderr is not None
             return await process.stderr.read()
 
+        async def _write_stdin() -> None:
+            """Feed the prompt to the child and close stdin, tolerating an early exit."""
+            if process.stdin is None:
+                return
+            try:
+                process.stdin.write(prompt.encode("utf-8"))
+                await process.stdin.drain()
+            except (BrokenPipeError, ConnectionResetError):
+                # The child stopped reading before consuming the prompt; the stdout/stderr
+                # readers and the exit code surface the real reason.
+                pass
+            finally:
+                with suppress(BrokenPipeError, ConnectionResetError):
+                    process.stdin.close()
+
+        stderr_task: asyncio.Task[bytes] | None = None
+        stdout_task: asyncio.Task[None] | None = None
         try:
             async with asyncio.timeout(self.timeout_seconds):
                 stderr_task = asyncio.create_task(_read_stderr())
-                await _read_stdout()
+                stdout_task = asyncio.create_task(_read_stdout())
+                # Feed stdin concurrently with reading stdout so a provider that emits
+                # output before consuming its prompt cannot deadlock the drain.
+                await _write_stdin()
+                await stdout_task
                 stderr_bytes = await stderr_task
                 returncode = await process.wait()
         except TimeoutError as error:
@@ -206,6 +263,16 @@ class SubprocessDriver:
         except asyncio.CancelledError:
             await self._terminate(process)
             raise ProviderCancelledError("Provider run cancelled by user.") from None
+        finally:
+            if process.returncode is None:
+                await self._terminate(process)
+            for task in (stdout_task, stderr_task):
+                if task is not None and not task.done():
+                    task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await task
+            with suppress(ProcessLookupError):
+                await process.wait()
 
         stderr_tail = stderr_bytes.decode("utf-8", errors="replace")[-2000:]
         response = self.build_response(spec, request, events, returncode, stderr_tail)

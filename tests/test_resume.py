@@ -2,7 +2,13 @@
 
 from datetime import UTC, datetime
 
-from curator.core.enums import LoopStatus, ProviderBindingStatus, ProviderProfileStatus
+from curator.core.enums import (
+    LoopStatus,
+    ProviderBindingStatus,
+    ProviderProfileStatus,
+    RoleName,
+    TaskStatus,
+)
 from curator.core.schema import ProviderProfileRecord, RoleProviderBindingRecord
 from curator.goals.store import accept_goal, propose_goal, save_goal
 from curator.app import start_goal_loop, write_init_state
@@ -19,6 +25,7 @@ from curator.state.repositories import (
     load_loop_run,
     load_loop_runs_for_session,
     load_pause_records_for_run,
+    load_tasks_for_session,
 )
 
 
@@ -99,6 +106,7 @@ def test_confirm_gate_resume_completes_loop(tmp_path, monkeypatch):
 
     resumed = resume_workflow_sync(connection, loop_run.id, "yes")
     refreshed = load_loop_run(connection, loop_run.id)
+    tasks = load_tasks_for_session(connection, loop_run.session_id)
     open_pauses = [
         record
         for record in load_pause_records_for_run(connection, loop_run.id)
@@ -109,6 +117,7 @@ def test_confirm_gate_resume_completes_loop(tmp_path, monkeypatch):
     assert resumed
     assert refreshed.status is LoopStatus.DONE
     assert open_pauses == []
+    assert any(task.role is RoleName.PM and task.status is TaskStatus.DONE for task in tasks)
 
 
 def test_resume_refuses_when_no_open_pause(tmp_path):

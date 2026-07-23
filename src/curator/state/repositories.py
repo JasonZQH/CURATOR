@@ -15,6 +15,7 @@ from curator.state.goals import (
     load_goal_run_for_loop,
     load_latest_goal_run,
     next_goal_revision_number,
+    update_goal_status,
 )
 from curator.state.loops import (
     insert_loop_decision,
@@ -26,6 +27,7 @@ from curator.state.loops import (
     load_loop_iterations_for_run,
     load_loop_run,
     load_loop_runs_for_session,
+    load_loop_runs_by_status,
 )
 from curator.state.messages import insert_message, load_messages_for_session
 from curator.state.role_selections import (
@@ -74,7 +76,12 @@ from curator.state.runtime import (
     load_work_item,
     load_work_items,
 )
-from curator.state.sessions import insert_session, load_latest_session, load_session
+from curator.state.sessions import (
+    insert_session,
+    load_latest_session,
+    load_session,
+    load_sessions_for_project,
+)
 from curator.state.tasks import insert_task, load_tasks_for_session
 
 __all__ = [
@@ -134,6 +141,7 @@ __all__ = [
     "load_loop_iterations_for_run",
     "load_loop_run",
     "load_loop_runs_for_session",
+    "load_loop_runs_by_status",
     "load_messages_for_session",
     "load_provider_binding_for_role",
     "load_provider_profile",
@@ -145,8 +153,10 @@ __all__ = [
     "load_role_selections_for_run",
     "load_role_instances",
     "load_session",
+    "load_sessions_for_project",
     "load_tasks_for_session",
     "load_work_item",
     "load_work_items",
     "next_goal_revision_number",
+    "update_goal_status",
 ]

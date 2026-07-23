@@ -9,9 +9,11 @@ in-memory execution state from those durable rows and re-enters the scheduler.
 import sqlite3
 from datetime import UTC, datetime
 
-from curator.core.enums import LoopStatus, LoopStepType, PauseStatus
+from curator.core.enums import LoopStatus, LoopStepType, PauseStatus, TaskStatus
 from curator.core.schema import GoalContract, MemoryEntryRecord, PauseRecord
+from curator.harness.workspace import stash_workspace
 from curator.providers.base import Provider
+from curator.providers.events import ProviderEventCallback
 from curator.providers.driver import driver_for_provider
 from curator.scheduler.engine import (
     DriverResolver,
@@ -21,10 +23,12 @@ from curator.scheduler.engine import (
     load_compiled_plan_for_run,
 )
 from curator.scheduler.step_writer import write_loop_completion
+from curator.scheduler.cancellation import CancellationToken
 from curator.state.repositories import (
     insert_loop_run,
     insert_memory_entry,
     insert_pause_record,
+    insert_task,
     load_evidence_refs_for_run,
     load_goal_revision,
     load_goal_run_for_loop,
@@ -34,13 +38,20 @@ from curator.state.repositories import (
     load_session,
     load_tasks_for_session,
 )
+from curator.state.transaction import transaction
 
 _AFFIRMATIVE = {"yes", "y", "confirm", "confirmed", "lgtm", "approve", "approved", "ship it"}
+_STASH_INTENT = {"stash", "stash & continue", "stash and continue"}
 
 
 def _affirmative(message: str) -> bool:
     """Return whether a resume message confirms delivery."""
     return message.strip().lower() in _AFFIRMATIVE
+
+
+def _is_stash_resume(pause: PauseRecord, message: str) -> bool:
+    """Return whether a dirty-workspace pause is being resumed with a stash."""
+    return pause.resume_mode == "workspace_dirty" and message.strip().lower() in _STASH_INTENT
 
 
 def _open_pause(connection: sqlite3.Connection, loop_run_id: str) -> PauseRecord | None:
@@ -105,6 +116,8 @@ async def resume_workflow(
     provider: Provider | None = None,
     driver_resolver: DriverResolver | None = None,
     created_at: datetime | None = None,
+    cancellation: CancellationToken | None = None,
+    on_event: ProviderEventCallback | None = None,
 ) -> bool:
     """Resume a paused loop from the ledger; return whether it resumed.
 
@@ -128,24 +141,45 @@ async def resume_workflow(
     if pause is None:
         return False
 
+    stash_resume = _is_stash_resume(pause, message)
+    dirty_pause = pause.resume_mode == "workspace_dirty"
     now = created_at or datetime.now(UTC)
-    insert_pause_record(
-        connection,
-        pause.model_copy(update={"status": PauseStatus.RESOLVED, "resolved_at": now}),
-    )
+    with transaction(connection):
+        insert_pause_record(
+            connection,
+            pause.model_copy(update={"status": PauseStatus.RESOLVED, "resolved_at": now}),
+        )
 
-    if pause.resume_mode == "confirm_gate" and _affirmative(message):
-        write_loop_completion(connection, loop_run, LoopStatus.DONE, now)
-        return True
+        if pause.resume_mode == "confirm_gate" and _affirmative(message):
+            for task in load_tasks_for_session(connection, session.id):
+                if task.id == pause.task_id:
+                    insert_task(
+                        connection,
+                        task.model_copy(update={"status": TaskStatus.DONE, "updated_at": now}),
+                    )
+                    break
+            write_loop_completion(connection, loop_run, LoopStatus.DONE, now)
+            return True
 
-    _record_resume_guidance(connection, str(session.project_root), pause, message)
-    running = loop_run.model_copy(update={"status": LoopStatus.RUNNING, "updated_at": now})
-    insert_loop_run(connection, running)
+        # A workspace-dirty resume ("stash", or a plain continue after a manual
+        # clean) is a command, not scope guidance — don't feed it to the writer.
+        if not dirty_pause:
+            _record_resume_guidance(connection, str(session.project_root), pause, message)
+        running = loop_run.model_copy(update={"status": LoopStatus.RUNNING, "updated_at": now})
+        insert_loop_run(connection, running)
+
+    # Stash the user's changes so the re-run writer gets a clean baseline. Done
+    # after the ledger commit, before _run_steps. The return is intentionally
+    # advisory: if the stash fails or finds nothing, the clean-tree guard re-fires
+    # and re-pauses, so the writer can never run on a dirty baseline.
+    if stash_resume:
+        stash_workspace(session.project_root)
 
     state = LoopExecutionState(
         pending_steps=_writer_onward(plan.steps),
         evidence_refs=list(load_evidence_refs_for_run(connection, loop_run_id)),
         run_sequence=len(load_loop_iterations_for_run(connection, loop_run_id)),
+        workspace_owned=bool(pause.metadata.get("workspace_owned")),
     )
     ctx = LoopExecutionContext(
         connection=connection,
@@ -161,6 +195,8 @@ async def resume_workflow(
         goal_contract=_goal_contract_for_loop(connection, loop_run_id),
         created_at=created_at,
         driver_resolver=driver_resolver,
+        cancellation=cancellation,
+        on_event=on_event,
     )
     await _run_steps(ctx, state)
     return True
@@ -173,17 +209,27 @@ def resume_workflow_sync(
     provider: Provider | None = None,
     driver_resolver: DriverResolver | None = None,
     created_at: datetime | None = None,
+    cancellation: CancellationToken | None = None,
+    on_event: ProviderEventCallback | None = None,
 ) -> bool:
     """Run resume_workflow synchronously (CLI/shell entry point)."""
     import asyncio
 
-    return asyncio.run(
-        resume_workflow(
-            connection,
-            loop_run_id,
-            message,
-            provider=provider,
-            driver_resolver=driver_resolver,
-            created_at=created_at,
+    try:
+        return asyncio.run(
+            resume_workflow(
+                connection,
+                loop_run_id,
+                message,
+                provider=provider,
+                driver_resolver=driver_resolver,
+                created_at=created_at,
+                cancellation=cancellation,
+                on_event=on_event,
+            )
         )
-    )
+    except asyncio.CancelledError:
+        from curator.scheduler.recovery import reconcile
+
+        reconcile(connection)
+        return False

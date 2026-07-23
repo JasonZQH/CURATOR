@@ -5,17 +5,18 @@ from pathlib import Path
 from curator.core.enums import ProviderErrorKind, ProviderName
 from curator.core.schema import HarnessRunSpec
 from curator.harness.context import render_prompt
-from curator.harness.workspace import (
-    WorkspaceBaseline,
-    capture_baseline,
-    require_clean_baseline,
-)
-from curator.providers.cli_common import build_cli_provider_response
+from curator.harness.workspace import WorkspaceBaseline, capture_baseline
+from curator.providers.cli_common import build_cli_provider_response, usage_tokens
 from curator.providers.contracts import ProviderRunRequest, ProviderRunResponse
 from curator.providers.driver import SubprocessDriver
-from curator.providers.events import ProviderEvent, ProviderEventKind
+from curator.providers.events import OUTPUT_CHUNK_MAX_CHARS, ProviderEvent, ProviderEventKind
+from curator.providers.limits import is_usage_limit, usage_limit_message
+from curator.providers.redact import redact_secrets
 from curator.runtime.action_policy import ActionPolicy
 from curator.runtime.permissions import codex_sandbox_args
+
+# Cap the tool-call detail (command or paths) shown in the transcript.
+_TOOL_DETAIL_MAX = 200
 
 
 class CodexCliDriver(SubprocessDriver):
@@ -32,20 +33,23 @@ class CodexCliDriver(SubprocessDriver):
 
     def build_argv(self, spec: HarnessRunSpec, request: ProviderRunRequest) -> list[str]:
         """Return the `codex exec --json` argv with policy-derived sandbox flags."""
-        baseline = capture_baseline(self.project_root)
-        if self.slot == "writer":
-            require_clean_baseline(baseline)
-        self._baselines[spec.id] = baseline
+        # The scheduler owns clean-tree enforcement (only on the loop's first
+        # writer dispatch); the driver just records the baseline for diffing.
+        self._baselines[spec.id] = capture_baseline(self.project_root)
         policy = ActionPolicy.for_project(self.project_root)
-        prompt = render_prompt(request, self.slot)
+        _ = request
         return [
             "codex",
             "exec",
             "--json",
             "--skip-git-repo-check",
             *codex_sandbox_args(policy, self.slot),
-            prompt,
         ]
+
+    def build_prompt(self, spec: HarnessRunSpec, request: ProviderRunRequest) -> str:
+        """Render the context package prompt for Codex stdin."""
+        _ = spec
+        return render_prompt(request, self.slot)
 
     def parse_event(
         self, line: str, provider_run_id: str, sequence: int
@@ -66,7 +70,7 @@ class CodexCliDriver(SubprocessDriver):
                     provider_run_id=provider_run_id,
                     sequence=sequence,
                     label=item_type,
-                    payload={"event": event_type},
+                    payload={"event": event_type, "detail": _codex_tool_detail(item)},
                 )
             text = item.get("text") or item.get("message")
             if isinstance(text, str) and text:
@@ -75,14 +79,18 @@ class CodexCliDriver(SubprocessDriver):
                 kind=ProviderEventKind.OUTPUT_CHUNK,
                 provider_run_id=provider_run_id,
                 sequence=sequence,
-                payload={"event": event_type},
+                    payload={"event": event_type, "text": str(text)[:OUTPUT_CHUNK_MAX_CHARS]},
             )
         if event_type in {"turn.completed", "turn.failed"}:
+            usage_payload = {"event": event_type, "provider": self.provider_name.value}
+            tokens = usage_tokens(payload)
+            if tokens is not None:
+                usage_payload["tokens"] = tokens
             return ProviderEvent(
                 kind=ProviderEventKind.USAGE,
                 provider_run_id=provider_run_id,
                 sequence=sequence,
-                payload={"event": event_type},
+                payload=usage_payload,
             )
         return None
 
@@ -96,6 +104,12 @@ class CodexCliDriver(SubprocessDriver):
     ) -> ProviderRunResponse:
         """Convert the observed Codex run into a typed response."""
         if returncode != 0:
+            if is_usage_limit(stderr_tail):
+                return self._failed_response(
+                    request,
+                    ProviderErrorKind.USAGE_LIMIT,
+                    usage_limit_message("Codex", stderr_tail),
+                )
             lowered = stderr_tail.lower()
             error_kind = (
                 ProviderErrorKind.PERMISSION_DENIED
@@ -115,3 +129,38 @@ class CodexCliDriver(SubprocessDriver):
             baseline=self._baselines.get(spec.id),
             project_root=self.project_root,
         )
+
+
+def _codex_tool_detail(item: dict) -> str:
+    """Summarize one Codex tool item: the command it ran, or the paths it changed.
+
+    Codex item field names vary by CLI version, so several likely keys are tried and the
+    result is redacted and length-bounded before it reaches the transcript.
+    """
+    detail = ""
+    for key in ("command", "cmd", "aggregated_command"):
+        value = item.get(key)
+        if isinstance(value, str) and value.strip():
+            detail = value.strip()
+            break
+    if not detail:
+        detail = _codex_change_paths(item)
+    exit_code = item.get("exit_code")
+    if detail and isinstance(exit_code, int) and exit_code != 0:
+        detail = f"{detail} (exit {exit_code})"
+    return redact_secrets(detail)[:_TOOL_DETAIL_MAX]
+
+
+def _codex_change_paths(item: dict) -> str:
+    """Return a comma-joined list of paths a file_change/patch item touched."""
+    changes = item.get("changes") or item.get("files") or []
+    paths: list[str] = []
+    if isinstance(changes, list):
+        for change in changes:
+            path = change.get("path") if isinstance(change, dict) else change
+            if isinstance(path, str) and path:
+                paths.append(path)
+    single = item.get("path")
+    if not paths and isinstance(single, str) and single:
+        paths.append(single)
+    return ", ".join(paths)

@@ -1,18 +1,20 @@
 """Run the Curator natural-language interactive shell."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Callable
 
 from curator.app import (
     resume_goal_loop,
     start_goal_loop,
-    write_init_state,
+    sync_goal_run_status,
 )
 from curator.core.enums import (
     ApprovalKind,
     ApprovalStatus,
     DiscoveryStatus,
+    LoopStatus,
     PauseStatus,
     ProviderBindingStatus,
 )
@@ -28,7 +30,10 @@ from curator.core.schema import (
     RoleProviderBindingRecord,
     WorkflowSnapshot,
 )
+from curator.diagnostics.doctor import inspect_project_health
+from curator.diagnostics.preflight import render_preflight, run_preflight
 from curator.diagnostics.status import inspect_project_status
+from curator.shell.banner import render_banner
 from curator.goals.store import accept_goal, propose_goal, save_goal
 from curator.nodes.inspection import (
     current_node,
@@ -38,6 +43,7 @@ from curator.nodes.inspection import (
 )
 from curator.rendering.terminal import (
     render_contract_validation_report,
+    render_doctor_report,
     render_status_report,
 )
 from curator.runtime.queue import tick_work_queue
@@ -54,6 +60,10 @@ from curator.runtime.workbench import (
 from curator.providers.events import ProviderEvent, ProviderEventKind
 from curator.providers.setup import add_provider_profile
 from curator.scheduler.snapshots import load_latest_workflow_snapshot
+from curator.scheduler.step_writer import write_loop_completion
+from curator.shell.intent import detect_cli_command, render_command_hint
+from curator.shell.menus import MenuSpec, proposal_menu
+from curator.shell.wizard import run_setup_wizard
 from curator.shell.onboarding import (
     apply_first_run_init,
     build_welcome_text,
@@ -83,7 +93,14 @@ from curator.state.repositories import (
     load_provider_binding_for_role,
     load_provider_profile,
     load_role_instances,
+    load_loop_run,
+    load_loop_runs_for_session,
+    load_sessions_for_project,
 )
+from curator.runtime.lockfile import ProjectLockedError, project_write_lock
+from curator.scheduler.cancellation import CancellationToken
+from curator.scheduler.recovery import reconcile_project
+from curator.shell.errors import recoverable_error_message
 from curator.team.roles import validate_role_contracts
 from curator.tui.workflow_panel import render_workflow_lines
 
@@ -96,7 +113,9 @@ class ShellState:
     pending_goal: GoalContract | None = None
     latest_snapshot: WorkflowSnapshot | None = None
     should_exit: bool = False
-    gate_mode: bool = False
+    gate_mode: bool = True
+    emit_event: Callable[[ProviderEvent], None] | None = None
+    cancellation: CancellationToken = field(default_factory=CancellationToken)
 
 
 @dataclass(frozen=True)
@@ -105,6 +124,7 @@ class ShellResponse:
 
     text: str
     should_exit: bool = False
+    menu: MenuSpec | None = None
 
 
 def _prompt_prefix(state: "ShellState") -> str:
@@ -161,7 +181,9 @@ def _help_text(full: bool = False) -> str:
                 "Curator commands:",
                 "- /help: show task-oriented help",
                 "- /help all: show this full command list",
+                "- /setup: guided setup (roles → providers → login)",
                 "- /goal current: show current draft or accepted goal",
+                "- /goal start: accept and start the saved draft goal",
                 "- /goal history: show goal and discovery history",
                 "- /node list: show workflow nodes",
                 "- /node current: show current workflow node",
@@ -186,6 +208,7 @@ def _help_text(full: bool = False) -> str:
                 "- /evidence: show latest run evidence refs",
                 "- /memory: show distilled runtime memory lessons",
                 "- /status: show project status",
+                "- /doctor: check project health and environment",
                 "- /validate: validate role contracts",
                 "- /quit: exit",
             ]
@@ -212,6 +235,7 @@ def _help_text(full: bool = False) -> str:
             "- /approvals, /approve <id>, /reject <id> — scoped approvals",
             "",
             "Configure providers:",
+            "- /setup — guided setup (roles → providers → login)",
             "- /provider add claude-code|codex — connect a local provider CLI",
             "- /providers — provider profiles, quota, bindings",
             "- /agents, /agent status <agent> — role pool state",
@@ -249,9 +273,37 @@ def _should_gate(state: ShellState, text: str) -> bool:
     return state.gate_mode or "\n" in text or len(text.split()) > 40
 
 
+# Shell-dialect equivalents for terminal next steps in shared reports.
+_SHELL_NEXT_STEPS = {
+    "curator provider add claude-code": "/provider add claude-code",
+    "curator init": "/init",
+    "curator": "Type what you want to work on.",
+}
+
+
 def _handle_status(state: ShellState) -> ShellResponse:
     """Render current project status for the shell."""
-    return ShellResponse(render_status_report(inspect_project_status(state.project_root)))
+    report = inspect_project_status(state.project_root)
+    shell_step = _SHELL_NEXT_STEPS.get(report.next_step)
+    if shell_step is not None:
+        report = replace(report, next_step=shell_step)
+    return ShellResponse(render_status_report(report))
+
+
+def _handle_doctor(state: ShellState) -> ShellResponse:
+    """Render project health plus environment preflight for the shell."""
+    report = inspect_project_health(state.project_root)
+    shell_step = _SHELL_NEXT_STEPS.get(report.recommended_next_step)
+    if shell_step is not None:
+        report = replace(report, recommended_next_step=shell_step)
+    return ShellResponse(
+        "\n\n".join(
+            [
+                render_doctor_report(report),
+                render_preflight(run_preflight(state.project_root)),
+            ]
+        )
+    )
 
 
 def _handle_validate(state: ShellState) -> ShellResponse:
@@ -264,7 +316,7 @@ def _handle_node_list(state: ShellState) -> ShellResponse:
     """Render nodes for the latest shell workflow snapshot."""
     snapshot = _latest_snapshot(state)
     if snapshot is None:
-        return ShellResponse("No nodes yet. Type a natural-language goal or run /demo first.")
+        return ShellResponse("No nodes yet. Type a natural-language goal first.")
     return ShellResponse(render_node_list(list_nodes(snapshot)))
 
 
@@ -272,7 +324,7 @@ def _handle_node_current(state: ShellState) -> ShellResponse:
     """Render the current or latest shell workflow node."""
     snapshot = _latest_snapshot(state)
     if snapshot is None:
-        return ShellResponse("No node yet. Type a natural-language goal or run /demo first.")
+        return ShellResponse("No node yet. Type a natural-language goal first.")
     rendered = render_node_view(current_node(snapshot))
     if snapshot.pause_records:
         pause = snapshot.pause_records[-1]
@@ -427,6 +479,14 @@ def _record_goal_approval(
 def _handle_approval_decision(
     state: ShellState, text: str, status: ApprovalStatus
 ) -> ShellResponse:
+    """Apply one approval mutation while holding the project write lock."""
+    with project_write_lock(state.project_root):
+        return _handle_approval_decision_unlocked(state, text, status)
+
+
+def _handle_approval_decision_unlocked(
+    state: ShellState, text: str, status: ApprovalStatus
+) -> ShellResponse:
     """Apply a user decision to one pending approval request."""
     parts = text.split(maxsplit=2)
     if len(parts) < 2:
@@ -510,7 +570,11 @@ def _handle_provider_add(state: ShellState, text: str) -> ShellResponse:
     parts = text.split()
     if len(parts) != 3:
         return ShellResponse("Usage: /provider add <claude-code|codex>")
-    write_init_state(state.project_root)
+    if not _database_exists(state):
+        return ShellResponse(
+            "Curator is not initialized here.\n"
+            "Run /setup for guided setup, or /init to create state first."
+        )
     connection = _connect_state(state)
     try:
         result = add_provider_profile(connection, parts[2])
@@ -602,6 +666,12 @@ def _handle_queue(state: ShellState) -> ShellResponse:
 
 def _handle_queue_tick(state: ShellState) -> ShellResponse:
     """Assign pending durable work to idle role instances."""
+    with project_write_lock(state.project_root):
+        return _handle_queue_tick_unlocked(state)
+
+
+def _handle_queue_tick_unlocked(state: ShellState) -> ShellResponse:
+    """Assign pending durable work while holding the project write lock."""
     connection = _connect_state(state)
     try:
         decisions = tick_work_queue(connection)
@@ -646,6 +716,25 @@ def _handle_session_current(state: ShellState) -> ShellResponse:
             ]
         )
     )
+
+
+def _handle_sessions(state: ShellState) -> ShellResponse:
+    """Render all durable sessions and their latest loop statuses."""
+    if not _database_exists(state):
+        return ShellResponse("Sessions:\n- none")
+    connection = _connect_state(state)
+    try:
+        sessions = load_sessions_for_project(connection, str(state.project_root))
+        lines = ["Sessions:"]
+        for session in sessions:
+            runs = load_loop_runs_for_session(connection, session.id)
+            latest = runs[-1] if runs else None
+            status = latest.status.value if latest is not None else session.status
+            run_id = latest.id if latest is not None else "-"
+            lines.append(f"- {session.id} [{status}] run={run_id}")
+        return ShellResponse("\n".join(lines) if sessions else "Sessions:\n- none")
+    finally:
+        connection.close()
 
 
 def _handle_memory(state: ShellState) -> ShellResponse:
@@ -698,19 +787,28 @@ def _handle_evidence(state: ShellState) -> ShellResponse:
     return ShellResponse("\n".join(lines))
 
 
+def _exit_response(state: ShellState) -> ShellResponse:
+    """Mark the shell for exit and return the farewell response."""
+    state.should_exit = True
+    return ShellResponse("Bye.", should_exit=True)
+
+
 def _handle_slash_command(state: ShellState, text: str) -> ShellResponse:
     """Route one slash command to a shell action."""
-    if text == "/quit":
-        state.should_exit = True
-        return ShellResponse("Bye.", should_exit=True)
+    if text in {"/quit", "/exit"}:
+        return _exit_response(state)
     if text == "/init":
         return ShellResponse(apply_first_run_init(state.project_root))
+    if text == "/setup":
+        return ShellResponse(run_setup_wizard(state.project_root).message)
     if text == "/help":
         return ShellResponse(_help_text())
     if text == "/help all":
         return ShellResponse(_help_text(full=True))
     if text == "/status":
         return _handle_status(state)
+    if text == "/doctor":
+        return _handle_doctor(state)
     if text == "/validate":
         return _handle_validate(state)
     if text == "/node list":
@@ -719,12 +817,16 @@ def _handle_slash_command(state: ShellState, text: str) -> ShellResponse:
         return _handle_node_current(state)
     if text == "/goal current":
         return _handle_goal_current(state)
+    if text == "/goal start":
+        return _handle_accept_goal(state)
     if text == "/goal history":
         return _handle_goal_history(state)
     if text == "/history":
         return _handle_history(state)
     if text == "/session current":
         return _handle_session_current(state)
+    if text == "/sessions":
+        return _handle_sessions(state)
     if text == "/workbench":
         return _handle_workbench(state)
     if text == "/agents":
@@ -761,7 +863,84 @@ def _handle_slash_command(state: ShellState, text: str) -> ShellResponse:
         return _handle_gate(state, text)
     if text == "/cancel":
         return _handle_cancel_goal(state)
-    return ShellResponse(f"Unknown command: {text}")
+    return ShellResponse(_unknown_command_text(text))
+
+
+KNOWN_SLASH_ROOTS = (
+    "/help", "/quit", "/init", "/setup", "/status", "/doctor", "/validate", "/node", "/goal",
+    "/history", "/session", "/sessions", "/workbench", "/agents", "/providers",
+    "/provider", "/agent", "/queue", "/approvals", "/approve", "/reject",
+    "/evidence", "/memory", "/resume", "/revise", "/gate", "/cancel",
+)
+
+# Full command phrases used for interactive completion suggestions.
+KNOWN_SLASH_COMMANDS = (
+    "/help", "/help all", "/setup", "/init", "/status", "/doctor", "/validate",
+    "/goal current", "/goal start", "/goal history", "/node list", "/node current",
+    "/resume", "/revise", "/gate on", "/gate off", "/cancel", "/history",
+    "/session current", "/sessions", "/workbench", "/agents", "/providers",
+    "/provider add claude-code", "/provider add codex", "/agent status",
+    "/agent bind", "/agent switch", "/queue", "/queue tick", "/approvals",
+    "/approve", "/reject", "/evidence", "/memory", "/quit",
+)
+
+# One user-facing description per command in KNOWN_SLASH_COMMANDS. Commands that take
+# arguments spell the argument form (<slot>, <id>, …) so the palette doubles as usage help.
+# test_slash_palette asserts every known command has an entry here — no generic fallback.
+_SLASH_DESCRIPTIONS = {
+    "/help": "Task-oriented help — what to do next",
+    "/help all": "List every shell command",
+    "/setup": "Configure roles and connect providers",
+    "/init": "Create Curator state in this project",
+    "/status": "Project status: goal, loop, providers",
+    "/doctor": "Run environment and readiness checks",
+    "/validate": "Check the project is ready to run",
+    "/goal current": "Show the current goal draft",
+    "/goal start": "Start the saved goal draft",
+    "/goal history": "Goal and discovery history",
+    "/node list": "List every node in the loop",
+    "/node current": "Show the active node and its evidence",
+    "/resume": "Resume a paused loop — /resume <answer>",
+    "/revise": "Change scope — /revise <new scope>",
+    "/gate on": "Require goal approval before starting",
+    "/gate off": "Start small requests immediately",
+    "/cancel": "Cancel the active run",
+    "/history": "Discussion, goal runs, and pauses",
+    "/session current": "Show the current session",
+    "/sessions": "List all sessions",
+    "/workbench": "Runtime workbench: roles, providers, evidence",
+    "/agents": "List agent slots and their bindings",
+    "/providers": "List connected provider profiles",
+    "/provider add claude-code": "Connect Claude Code",
+    "/provider add codex": "Connect Codex",
+    "/agent status": "Show a slot's binding — /agent status <slot>",
+    "/agent bind": "Bind a provider to a slot — /agent bind <slot> <provider>",
+    "/agent switch": "Switch a slot's provider — /agent switch <slot> <provider>",
+    "/queue": "Show pending and ready work",
+    "/queue tick": "Advance the queue one step",
+    "/approvals": "List pending approval requests",
+    "/approve": "Approve a request — /approve <id> [note]",
+    "/reject": "Reject a request — /reject <id> [note]",
+    "/evidence": "Show verification evidence",
+    "/memory": "Show learned project memory",
+    "/quit": "Exit the shell — or just type quit / exit",
+}
+
+SLASH_COMMAND_SPECS: tuple[tuple[str, str], ...] = tuple(
+    (command, _SLASH_DESCRIPTIONS.get(command, "Run this Curator command"))
+    for command in KNOWN_SLASH_COMMANDS
+)
+
+
+def _unknown_command_text(text: str) -> str:
+    """Return the unknown-command notice with a closest-match suggestion."""
+    from difflib import get_close_matches
+
+    first = text.split()[0]
+    matches = get_close_matches(first, KNOWN_SLASH_ROOTS, n=1, cutoff=0.6)
+    if not matches:
+        return f"Unknown command: {text}\nType /help for commands."
+    return f"Unknown command: {text}\nDid you mean {matches[0]}? (/help for all commands)"
 
 
 def _handle_gate(state: ShellState, text: str) -> ShellResponse:
@@ -820,6 +999,12 @@ def _resolve_scope_change_pause(state: ShellState, goal: GoalContract) -> None:
 
 def _start_accepted_goal(state: ShellState, auto: bool = False) -> ShellResponse:
     """Accept the pending proposal and start its loop."""
+    with project_write_lock(state.project_root):
+        return _start_accepted_goal_unlocked(state, auto=auto)
+
+
+def _start_accepted_goal_unlocked(state: ShellState, auto: bool = False) -> ShellResponse:
+    """Accept one proposal while the caller owns the project write lock."""
     if state.pending_goal is None:
         state.pending_goal = _latest_durable_goal_draft(state)
     if state.pending_goal is None:
@@ -831,16 +1016,20 @@ def _start_accepted_goal(state: ShellState, auto: bool = False) -> ShellResponse
         state.pending_goal,
         message="auto-accepted (fast path)" if auto else "accepted from shell yes",
     )
-    write_init_state(state.project_root)
     save_goal(paths, state.pending_goal)
     _resolve_scope_change_pause(state, state.pending_goal)
     acceptance = accept_goal(paths, state.pending_goal.id)
     try:
         snapshot = start_goal_loop(
-            state.project_root, acceptance.revision_id, on_event=_print_progress_event
+            state.project_root,
+            acceptance.revision_id,
+            on_event=state.emit_event or _print_progress_event,
+            cancellation=state.cancellation,
         )
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ProjectLockedError) as error:
         state.pending_goal = None
+        if isinstance(error, ProjectLockedError):
+            return ShellResponse(str(error))
         return ShellResponse(
             "Run interrupted. Ledger state is preserved — /workbench to inspect."
         )
@@ -864,6 +1053,12 @@ def _handle_accept_goal(state: ShellState) -> ShellResponse:
 
 def _handle_cancel_goal(state: ShellState) -> ShellResponse:
     """Discard the pending proposal without starting a loop."""
+    with project_write_lock(state.project_root):
+        return _handle_cancel_goal_unlocked(state)
+
+
+def _handle_cancel_goal_unlocked(state: ShellState) -> ShellResponse:
+    """Cancel a proposal or pause while holding the project write lock."""
     if _database_exists(state):
         connection = _connect_state(state)
         try:
@@ -888,6 +1083,13 @@ def _handle_cancel_goal(state: ShellState) -> ShellResponse:
                         update={"status": PauseStatus.RESOLVED, "resolved_at": now}
                     ),
                 )
+                # Mark the loop terminally cancelled and propagate that to the goal. Otherwise
+                # the loop stays PAUSED with no open pause, and startup recovery treats it as a
+                # crash and recreates an interrupted pause — resurrecting the cancelled run.
+                loop_run = load_loop_run(connection, pause.loop_run_id)
+                if loop_run is not None:
+                    write_loop_completion(connection, loop_run, LoopStatus.CANCELLED, now)
+                    sync_goal_run_status(connection, loop_run.id)
                 state.pending_goal = None
                 return ShellResponse("Paused loop cancelled.")
         finally:
@@ -980,8 +1182,21 @@ def _handle_scope_change(state: ShellState, text: str, pause_id: str) -> ShellRe
 
 
 def _handle_resume(state: ShellState, message: str) -> ShellResponse:
+    """Answer the latest pause while serializing all related ledger writes."""
+    if not _database_exists(state):
+        return _handle_resume_unlocked(state, message)
+    with project_write_lock(state.project_root):
+        return _handle_resume_unlocked(state, message)
+
+
+def _handle_resume_unlocked(state: ShellState, message: str) -> ShellResponse:
     """Answer the latest pause, resolve it, and resume when supported."""
     cleaned = message.strip()
+    loop_run_id: str | None = None
+    parts = cleaned.split(maxsplit=2)
+    if len(parts) >= 2 and parts[0] == "--run":
+        loop_run_id = parts[1]
+        cleaned = parts[2].strip() if len(parts) == 3 else ""
     if not cleaned:
         return ShellResponse("Resume needs a message: /resume <message>")
     if not _database_exists(state):
@@ -989,7 +1204,7 @@ def _handle_resume(state: ShellState, message: str) -> ShellResponse:
 
     connection = _connect_state(state)
     try:
-        pause = load_latest_pause_record(connection)
+        pause = load_latest_pause_record(connection, loop_run_id)
         if pause is None:
             return ShellResponse("No paused loop to resume.")
         # Record the resume as a durable audit event, but let resume_workflow
@@ -1009,7 +1224,13 @@ def _handle_resume(state: ShellState, message: str) -> ShellResponse:
     finally:
         connection.close()
 
-    snapshot = resume_goal_loop(state.project_root, cleaned)
+    snapshot = resume_goal_loop(
+        state.project_root,
+        cleaned,
+        on_event=state.emit_event or _print_progress_event,
+        cancellation=state.cancellation,
+        loop_run_id=loop_run_id,
+    )
     if snapshot is None:
         return ShellResponse(f"Resume recorded: {cleaned}")
     state.latest_snapshot = snapshot
@@ -1017,6 +1238,14 @@ def _handle_resume(state: ShellState, message: str) -> ShellResponse:
 
 
 def _handle_revise(state: ShellState, message: str) -> ShellResponse:
+    """Draft a revised goal proposal while serializing its ledger and file writes."""
+    if not _database_exists(state):
+        return _handle_revise_unlocked(state, message)
+    with project_write_lock(state.project_root):
+        return _handle_revise_unlocked(state, message)
+
+
+def _handle_revise_unlocked(state: ShellState, message: str) -> ShellResponse:
     """Draft a revised goal proposal from the latest pause."""
     cleaned = message.strip()
     if not cleaned:
@@ -1066,15 +1295,37 @@ def _paused_loop_exists(state: ShellState) -> bool:
         connection.close()
 
 
+def _setup_mode_refusal(state: ShellState, mode) -> ShellResponse:
+    """Refuse to start work in setup mode without touching any state."""
+    lines = [
+        f"Curator is in setup mode ({mode.detail}) — nothing was started or saved.",
+        "- /setup — guided setup (roles → providers → login)",
+        "Or set up manually:",
+    ]
+    if first_run_needed(state.project_root):
+        lines.append("- /init — create Curator state here")
+    lines.extend(
+        [
+            "- /provider add claude-code   (or: /provider add codex)",
+            "- /agent bind writer.default claude-code",
+            "Then type your request again.",
+        ]
+    )
+    return ShellResponse("\n".join(lines))
+
+
 def _handle_natural_language(state: ShellState, text: str) -> ShellResponse:
     """Create a goal proposal, gating only large or opted-in requests."""
+    mode = resolve_mode_for_project(state.project_root)
+    if mode.label == "setup":
+        return _setup_mode_refusal(state, mode)
     paths = build_curator_paths(state.project_root)
     goal = propose_goal(text, existing_ids=_existing_goal_ids(state))
     save_goal(paths, goal)
     if _should_gate(state, text):
         _record_discovery_turn(state, goal, text)
         state.pending_goal = goal
-        return ShellResponse(_render_goal_proposal(goal))
+        return ShellResponse(_render_goal_proposal(goal), menu=proposal_menu())
 
     _record_discovery_turn(state, goal, text, metadata={"fast_path": True})
     state.pending_goal = goal
@@ -1089,62 +1340,136 @@ def _handle_proposal_answer(state: ShellState, stripped: str, lowered: str) -> S
         return _handle_cancel_goal(state)
     state.pending_goal = _apply_goal_edit(state.pending_goal, stripped[5:])
     save_goal(build_curator_paths(state.project_root), state.pending_goal)
-    return ShellResponse(_render_goal_proposal(state.pending_goal))
+    return ShellResponse(_render_goal_proposal(state.pending_goal), menu=proposal_menu())
 
 
-def handle_shell_input(state: ShellState, text: str) -> ShellResponse:
-    """Handle one line of shell input."""
+def _handle_shell_input(state: ShellState, text: str) -> ShellResponse:
+    """Handle one line of shell input inside the guarded dispatch boundary."""
     stripped = text.strip()
     lowered = stripped.lower()
     if not stripped:
         return ShellResponse("")
     if stripped.startswith("/"):
-        return _handle_slash_command(state, stripped)
+        try:
+            return _handle_slash_command(state, stripped)
+        except ProjectLockedError as error:
+            return ShellResponse(str(error))
+    if lowered in {"quit", "exit"}:
+        return _exit_response(state)
     is_answer = lowered in {"yes", "y", "start", "no", "n", "cancel"} or lowered.startswith(
         "edit "
     )
     if state.pending_goal is not None and is_answer:
         return _handle_proposal_answer(state, stripped, lowered)
+    command_intent = detect_cli_command(stripped)
+    if command_intent is not None:
+        return ShellResponse(render_command_hint(command_intent))
     if _paused_loop_exists(state):
         return _paused_input_notice(state)
-    if lowered in {"yes", "y", "start"}:
-        return _handle_accept_goal(state)
-    if lowered in {"no", "n", "cancel"}:
-        return _handle_cancel_goal(state)
-    if lowered.startswith("edit "):
-        if state.pending_goal is None:
-            return ShellResponse("No pending goal to edit.")
-        return _handle_proposal_answer(state, stripped, lowered)
+    if is_answer:
+        lines = ["No pending proposal to answer."]
+        if _latest_durable_goal_draft(state) is not None:
+            lines.append(
+                "A saved draft exists — review it with /goal current, start it with /goal start."
+            )
+        lines.append("Type what you want to work on, or /help.")
+        return ShellResponse("\n".join(lines))
     return _handle_natural_language(state, stripped)
 
 
+def handle_shell_input(state: ShellState, text: str) -> ShellResponse:
+    """Handle one line and convert unexpected failures into logged responses."""
+    try:
+        return _handle_shell_input(state, text)
+    except ProjectLockedError as error:
+        return ShellResponse(str(error))
+    except Exception as error:
+        return ShellResponse(
+            recoverable_error_message(state.project_root, "shell input", error)
+        )
+
+
 def _offer_first_run_init(project_root: Path) -> None:
-    """Offer to initialize a fresh project on an interactive terminal."""
+    """Offer the setup wizard for a fresh project on an interactive terminal."""
     import sys
 
     if not first_run_needed(project_root) or not sys.stdin.isatty():
         return
     print("This project is not initialized yet.")
     try:
-        answer = input("Initialize Curator here now? [y/N] ")
+        answer = input("Run the setup wizard now? [Y/n] ")
     except EOFError:
         return
-    if answer.strip().lower() in {"y", "yes"}:
-        print(apply_first_run_init(project_root))
+    if answer.strip().lower() in {"", "y", "yes"}:
+        print(run_setup_wizard(project_root).message)
 
 
-def run_interactive_shell(project_root: Path, gate: bool = False) -> None:
+def _should_run_preflight() -> bool:
+    """Return whether startup preflight probes should run.
+
+    Interactive terminals always get the preflight; pipes and tests skip
+    the subprocess probes unless CURATOR_PREFLIGHT=force is set.
+    """
+    import os
+    import sys
+
+    if os.environ.get("CURATOR_PREFLIGHT") == "force":
+        return True
+    if os.environ.get("CURATOR_PREFLIGHT") == "skip":
+        return False
+    return sys.stdin.isatty()
+
+
+def run_interactive_shell(project_root: Path, gate: bool = True) -> None:
     """Run the blocking stdin/stdout Curator shell."""
+    from curator.tui.prompt_input import (
+        configure_shell_completion,
+        load_shell_history,
+        read_multiline,
+        save_shell_history,
+    )
+
+    import sys
+
     state = ShellState(project_root=project_root, gate_mode=gate)
+    print(render_banner(project_root))
+    print()
+    try:
+        recovered = reconcile_project(project_root)
+    except Exception as error:
+        print(recoverable_error_message(project_root, "startup recovery", error))
+        recovered = 0
+    if recovered:
+        print(f"Recovered {recovered} interrupted run(s).")
+    if _should_run_preflight():
+        try:
+            print(render_preflight(run_preflight(project_root)))
+        except Exception as error:
+            print(recoverable_error_message(project_root, "startup preflight", error))
+        print()
     _offer_first_run_init(project_root)
     print(build_welcome_text(project_root))
-    while not state.should_exit:
-        try:
-            line = input(_prompt_prefix(state))
-        except EOFError:
-            break
-        response = handle_shell_input(state, line)
-        if response.text:
-            print(response.text)
-        if response.should_exit:
-            break
+    history_enabled = sys.stdin.isatty()
+    try:
+        if history_enabled:
+            try:
+                load_shell_history(project_root)
+                configure_shell_completion()
+            except Exception as error:
+                print(recoverable_error_message(project_root, "shell history", error))
+        while not state.should_exit:
+            try:
+                line = read_multiline(_prompt_prefix(state))
+            except EOFError:
+                break
+            response = handle_shell_input(state, line)
+            if response.text:
+                print(response.text)
+            if response.should_exit:
+                break
+    finally:
+        if history_enabled:
+            try:
+                save_shell_history(project_root)
+            except Exception as error:
+                print(recoverable_error_message(project_root, "shell history", error))

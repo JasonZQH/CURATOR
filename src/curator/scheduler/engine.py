@@ -15,6 +15,7 @@ from curator.core.enums import (
     LoopStepType,
     PauseStatus,
     ProviderName,
+    ProviderErrorKind,
     ProviderRunStatus,
     StepExecutorType,
     StopCondition,
@@ -45,13 +46,23 @@ from curator.harness.verifier import (
     discover_verification_commands,
     run_verification,
 )
-from curator.harness.workspace import WorkspaceDirtyError
+from curator.harness.workspace import (
+    WorkspaceDirtyError,
+    capture_baseline,
+    require_clean_baseline,
+)
 from curator.memory.distill import record_decision_memory
 from curator.loops.compiler import compile_coding_delivery_plan
-from curator.providers.contracts import ProviderRunRequest, classify_provider_error
+from curator.providers.contracts import (
+    ProviderCancelledError,
+    ProviderRunRequest,
+    classify_provider_error,
+)
+from curator.providers.redact import StreamRedactor, redact_error, redact_secrets
 from curator.providers.base import Provider
 from curator.providers.driver import ProviderDriver, driver_for_provider
 from curator.providers.events import (
+    OUTPUT_CHUNK_MAX_CHARS,
     ProviderEvent,
     ProviderEventCallback,
     ProviderEventKind,
@@ -85,8 +96,10 @@ from curator.state.repositories import (
     load_session,
     load_tasks_for_session,
 )
+from curator.state.transaction import transaction
 from curator.core.enums import EventType
 from curator.scheduler.decision import RuntimeDecision, decide_runtime
+from curator.scheduler.cancellation import CancellationToken
 
 MAX_ITERATIONS = 12
 DEFAULT_MAX_STEP_RETRIES = 1
@@ -129,6 +142,7 @@ class LoopExecutionContext:
     created_at: datetime | None
     on_event: ProviderEventCallback | None = None
     driver_resolver: "DriverResolver | None" = None
+    cancellation: CancellationToken | None = None
 
     def driver_for_step(self, step: CompiledLoopStep) -> ProviderDriver:
         """Return the driver for one step, honoring slot bindings when present."""
@@ -136,7 +150,9 @@ class LoopExecutionContext:
             return self.driver_resolver(step)
         if self.driver is None:
             raise ProviderConfigurationError(
-                "No provider driver configured. Run `curator provider add <name>`."
+                "No provider driver configured. Connect one with /provider add "
+                "<name> in the Curator shell (or `curator provider add <name>` "
+                "in your terminal)."
             )
         return self.driver
 
@@ -150,6 +166,7 @@ class LoopExecutionState:
     run_sequence: int = 0
     retry_counts: dict[str, int] = field(default_factory=dict)
     retry_task_ids: set[str] = field(default_factory=set)
+    workspace_owned: bool = False
 
 
 @dataclass(frozen=True)
@@ -176,9 +193,36 @@ _LEDGER_EVENT_TYPES = {
     ProviderEventKind.STARTED: EventType.PROVIDER_RUN_STARTED,
     ProviderEventKind.TOOL_CALL: EventType.PROVIDER_TOOL_CALL,
     ProviderEventKind.PERMISSION_REQUEST: EventType.PROVIDER_PERMISSION_REQUEST,
+    ProviderEventKind.OUTPUT_CHUNK: EventType.PROVIDER_OUTPUT_CHUNK,
     ProviderEventKind.COMPLETED: EventType.PROVIDER_RUN_COMPLETED,
     ProviderEventKind.FAILED: EventType.PROVIDER_RUN_COMPLETED,
 }
+
+
+def _ledger_event_payload(
+    event: ProviderEvent, redactor: StreamRedactor | None = None
+) -> dict:
+    """Return the durable ledger payload for a provider event.
+
+    Provider stdout can echo credentials, so OUTPUT_CHUNK text is scrubbed before it is
+    persisted (errors are already redacted via redact_error). A ``redactor`` threads the
+    scrub across the whole streamed transcript so a secret split over two chunk boundaries
+    is caught too, and its held-back tail is flushed onto the terminal event; without one
+    each chunk is redacted (and head-capped) in isolation.
+    """
+    payload = {"kind": event.kind.value, "label": event.label}
+    if event.kind is ProviderEventKind.OUTPUT_CHUNK:
+        raw = str(event.payload.get("text", ""))
+        text = redactor.scrub(raw) if redactor is not None else redact_secrets(raw)
+        payload["text"] = text[:OUTPUT_CHUNK_MAX_CHARS]
+    elif redactor is not None and event.kind in (
+        ProviderEventKind.COMPLETED,
+        ProviderEventKind.FAILED,
+    ):
+        tail = redactor.flush()
+        if tail:
+            payload["text"] = tail[:OUTPUT_CHUNK_MAX_CHARS]
+    return payload
 
 
 def _ledger_event_recorder(
@@ -188,6 +232,9 @@ def _ledger_event_recorder(
 ) -> ProviderEventCallback:
     """Return a callback that ledgers provider events and forwards them."""
     counter = {"count": 0}
+    # One redactor per provider run so a secret split across streamed chunks is scrubbed
+    # as a continuous transcript rather than one isolated chunk at a time.
+    redactor = StreamRedactor()
 
     def _record(event: ProviderEvent) -> None:
         """Ledger one provider event and forward it to the caller callback."""
@@ -202,7 +249,7 @@ def _ledger_event_recorder(
                     task_id=task_id,
                     type=event_type,
                     created_at=_timestamp(ctx.created_at),
-                    payload={"kind": event.kind.value, "label": event.label},
+                    payload=_ledger_event_payload(event, redactor),
                 ),
             )
         if ctx.on_event is not None:
@@ -268,12 +315,13 @@ def create_workflow_session(
         compiled_plan=plan,
     )
 
-    insert_session(connection, skeleton.session)
-    for task in skeleton.tasks:
-        insert_task(connection, task)
-    insert_loop_run(connection, skeleton.loop_run)
-    for selection in skeleton.role_selections:
-        insert_role_selection(connection, selection)
+    with transaction(connection):
+        insert_session(connection, skeleton.session)
+        for task in skeleton.tasks:
+            insert_task(connection, task)
+        insert_loop_run(connection, skeleton.loop_run)
+        for selection in skeleton.role_selections:
+            insert_role_selection(connection, selection)
     return skeleton.session.id
 
 
@@ -374,21 +422,52 @@ def _provider_quota_status(provider: Provider) -> str | None:
 
 
 def _pause_reason_for_provider_error(provider_error: Exception) -> str | None:
-    """Return a pause reason for provider errors that need human input."""
+    """Return a pause reason only for known recoverable provider failures."""
     if isinstance(provider_error, ProviderConfigurationError):
         return f"{provider_error} Pausing until a real provider is configured."
     if isinstance(provider_error, WorkspaceDirtyError):
         return f"{provider_error} Pausing so existing changes are not misattributed."
-    error_kind = classify_provider_error(provider_error)
-    if error_kind.value == "invalid_output":
-        return "Provider invalid output; pausing for user input."
-    if error_kind.value == "permission_denied":
-        return "Provider permission denied; pausing for user input."
-    if error_kind.value == "timeout":
-        return "Provider timed out; pausing for user input."
-    if error_kind.value == "cancelled":
+    if isinstance(provider_error, FileNotFoundError):
+        return f"Provider executable is unavailable: {provider_error}. Pausing for setup."
+    if isinstance(provider_error, ConnectionError):
+        return f"Provider connection is unavailable: {provider_error}. Pausing for setup."
+    if isinstance(provider_error, ProviderCancelledError):
         return "Provider was cancelled; pausing for user input."
+    error_kind = classify_provider_error(provider_error)
+    if error_kind is ProviderErrorKind.INVALID_OUTPUT:
+        return "Provider invalid output; pausing for user input."
+    if error_kind is ProviderErrorKind.PERMISSION_DENIED:
+        return "Provider permission denied; pausing for user input."
+    if error_kind is ProviderErrorKind.TIMEOUT:
+        return "Provider timed out; pausing for user input."
+    if error_kind is ProviderErrorKind.CANCELLED:
+        return "Provider was cancelled; pausing for user input."
+    # An untyped exception classified as provider_unavailable is an unexpected provider
+    # bug, not a recognized recoverable failure: return None so the run STOP_FAILEDs
+    # (see test_provider_failure_matrix_stops_on_untyped_runtime_error). The pause-worthy
+    # provider_unavailable in decision._PAUSED_ERROR_KINDS is the result-reported kind.
     return None
+
+
+_WORKSPACE_DIRTY_PAUSE = {
+    "pause_question": (
+        "Your working tree has uncommitted changes. The writer needs a clean "
+        "tree so its recorded diff is attributable to the writer alone."
+    ),
+    "pause_requested_input": (
+        "Reply `/resume stash` to stash your changes and continue (restore them "
+        "later with `git stash pop`), or stash/commit them yourself and reply "
+        "`/resume continue`."
+    ),
+    "pause_resume_mode": "workspace_dirty",
+}
+
+
+def _pause_overrides_for_provider_error(provider_error: Exception | None) -> dict[str, str]:
+    """Return pause-card overrides for errors that warrant a tailored prompt."""
+    if isinstance(provider_error, WorkspaceDirtyError):
+        return dict(_WORKSPACE_DIRTY_PAUSE)
+    return {}
 
 
 def _pause_record_for_decision(
@@ -500,6 +579,38 @@ def _provider_response_payload(result) -> dict:
     }
 
 
+def _provider_stop_metadata(result, provider_error: Exception | None) -> dict[str, str]:
+    """Return durable actor and reason metadata for provider stop paths."""
+    if provider_error is not None:
+        kind = classify_provider_error(provider_error)
+        if kind is ProviderErrorKind.CANCELLED:
+            return {
+                "stopped_by": "USER",
+                "stop_reason": "USER_INTERRUPTED",
+                "error_message": redact_error(str(provider_error)),
+            }
+        if kind is ProviderErrorKind.TIMEOUT:
+            return {
+                "stopped_by": "SYSTEM",
+                "stop_reason": "TIMEOUT",
+                "error_message": redact_error(str(provider_error)),
+            }
+        return {
+            "stopped_by": "PROVIDER",
+            "stop_reason": "PROVIDER_ERROR",
+            "error_message": redact_error(str(provider_error)),
+        }
+    error_kind = str(result.metadata.get("error_kind", "")) if result is not None else ""
+    if result is not None and result.status is HarnessStatus.FAILED:
+        return {
+            "stopped_by": "PROVIDER",
+            "stop_reason": "PROVIDER_ERROR",
+            "error_kind": error_kind,
+            "error_message": redact_error(result.metadata.get("error_message")),
+        }
+    return {}
+
+
 async def _execute_step(
     ctx: LoopExecutionContext,
     state: LoopExecutionState,
@@ -569,6 +680,17 @@ def _execute_human_gate_step(
         iteration=iteration,
         decision_record=decision,
         completed_at=now,
+    )
+
+
+def _has_implementation_evidence(state: LoopExecutionState) -> bool:
+    """Return whether a writer has already produced evidence in this loop.
+
+    True once the loop owns the workspace (across retries and resumes), so the
+    clean-tree guard is skipped for subsequent writer dispatches.
+    """
+    return state.workspace_owned or any(
+        evidence.kind is EvidenceKind.IMPLEMENTATION for evidence in state.evidence_refs
     )
 
 
@@ -659,7 +781,11 @@ def _execute_verifier_step(
         runtime_decision = RuntimeDecision(
             decision=LoopDecisionType.HUMAN_HANDOFF,
             stop_condition=StopCondition.HUMAN_HANDOFF_REQUESTED,
-            reason="No verification commands configured; pausing for user input.",
+            reason=(
+                "No verification commands were found (no tests, pyproject pytest/ruff, "
+                "or package.json test/lint). Add tests or set the step's "
+                "verification_commands, then resume; Curator will not claim unverified success."
+            ),
         )
     else:
         runtime_decision = decide_runtime(step, result, role_contracts=ctx.role_contracts)
@@ -795,6 +921,11 @@ async def _execute_provider_step(
     result = None
     provider_identity = None
     try:
+        # Enforce a clean workspace only on the loop's very first writer
+        # dispatch. Retries and resumes legitimately build on the writer's own
+        # prior (uncommitted) output, so the guard must not block them.
+        if step.slot == "writer" and not _has_implementation_evidence(state):
+            require_clean_baseline(capture_baseline(ctx.session.project_root))
         driver = ctx.driver_for_step(step)
         provider_identity = driver
         insert_provider_run(
@@ -809,13 +940,27 @@ async def _execute_provider_step(
                 {"scheduler_decision": "pending"},
             ),
         )
-        result = await run_harness_async(
-            spec,
-            driver,
-            provider_request,
-            created_at=step_started_at,
-            on_event=recorder,
-        )
+        # Coalesce the per-event ledger writes: streaming providers emit many
+        # OUTPUT_CHUNK/lifecycle events, and each insert_event would otherwise COMMIT
+        # (fsync) on the event-loop thread. One transaction commits them once at step
+        # end. A mid-run provider failure (timeout/cancel/crash) is not a database error,
+        # and the transcript up to that point is the most valuable audit evidence — so the
+        # error is caught inside the block, letting the transaction commit the streamed
+        # events, and only re-raised afterward into the failure handling below.
+        harness_error: Exception | None = None
+        with transaction(connection):
+            try:
+                result = await run_harness_async(
+                    spec,
+                    driver,
+                    provider_request,
+                    created_at=step_started_at,
+                    on_event=recorder,
+                )
+            except Exception as error:  # noqa: BLE001 - re-raised after the commit
+                harness_error = error
+        if harness_error is not None:
+            raise harness_error
         runtime_decision = _decision_for_provider_signal(result) or decide_runtime(
             step, result, role_contracts=ctx.role_contracts
         )
@@ -847,10 +992,17 @@ async def _execute_provider_step(
             state.retry_counts[retry_step.task_id] = attempts + 1
 
     step_completed_at = _timestamp(ctx.created_at)
+    provider_stop_metadata = _provider_stop_metadata(result, provider_error)
+    pause_overrides = _pause_overrides_for_provider_error(provider_error)
     iteration = iteration.model_copy(
         update={
-            "status": HarnessStatus.FAILED if provider_error else HarnessStatus.SUCCEEDED,
+            "status": (
+                HarnessStatus.FAILED
+                if provider_error or (result is not None and result.status is HarnessStatus.FAILED)
+                else HarnessStatus.SUCCEEDED
+            ),
             "completed_at": step_completed_at,
+            "metadata": provider_stop_metadata,
         }
     )
     decision = LoopDecisionRecord(
@@ -861,24 +1013,39 @@ async def _execute_provider_step(
         stop_condition=runtime_decision.stop_condition,
         reason=runtime_decision.reason,
         created_at=step_completed_at,
+        metadata={**provider_stop_metadata, **pause_overrides},
     )
 
     insert_loop_iteration(connection, iteration)
+    provider_failed = provider_error is not None or (
+        result is not None and result.status is HarnessStatus.FAILED
+    )
     if provider_identity is not None:
+        provider_record = _provider_run_record(
+            provider_identity,
+            spec,
+            provider_request,
+            step_completed_at,
+            ProviderRunStatus.FAILED if provider_failed else ProviderRunStatus.SUCCEEDED,
+            {"status": "failed" if provider_failed else "succeeded"}
+            if result is None
+            else _provider_response_payload(result),
+            {"scheduler_decision": runtime_decision.decision.value, **provider_stop_metadata},
+            provider_error,
+        )
+        if result is not None and result.status is HarnessStatus.FAILED:
+            raw_kind = result.metadata.get("error_kind")
+            provider_record = provider_record.model_copy(
+                update={
+                    "error_kind": (
+                        ProviderErrorKind(raw_kind) if raw_kind in {kind.value for kind in ProviderErrorKind} else None
+                    ),
+                    "error_message": redact_error(result.metadata.get("error_message")),
+                }
+            )
         insert_provider_run(
             connection,
-            _provider_run_record(
-                provider_identity,
-                spec,
-                provider_request,
-                step_completed_at,
-                ProviderRunStatus.FAILED if provider_error else ProviderRunStatus.SUCCEEDED,
-                {"status": "failed" if provider_error else "succeeded"}
-                if result is None
-                else _provider_response_payload(result),
-                {"scheduler_decision": runtime_decision.decision.value},
-                provider_error,
-            ),
+            provider_record,
         )
     if result is not None:
         for evidence in result.evidence_refs:
@@ -932,7 +1099,11 @@ async def _execute_provider_step(
 async def _run_steps(ctx: LoopExecutionContext, state: LoopExecutionState) -> None:
     """Run pending steps until the loop stops, pauses, or completes."""
     connection = ctx.connection
+    if ctx.cancellation is not None:
+        ctx.cancellation.bind()
     while state.pending_steps:
+        if ctx.cancellation is not None:
+            ctx.cancellation.raise_if_cancelled()
         step = state.pending_steps.pop(0)
         outcome = await _execute_step(ctx, state, step)
         decision_type = outcome.runtime_decision.decision
@@ -942,13 +1113,23 @@ async def _run_steps(ctx: LoopExecutionContext, state: LoopExecutionState) -> No
             return
 
         if decision_type is LoopDecisionType.HUMAN_HANDOFF:
-            insert_pause_record(
-                connection,
-                _pause_record_for_decision(
+            with transaction(connection):
+                pause = _pause_record_for_decision(
                     ctx.loop_run.id, outcome.iteration, outcome.decision_record
-                ),
-            )
-            write_loop_pause(connection, ctx.loop_run, outcome.completed_at)
+                )
+                pause = pause.model_copy(
+                    update={
+                        "metadata": {
+                            **pause.metadata,
+                            "workspace_owned": _has_implementation_evidence(state),
+                        }
+                    }
+                )
+                insert_pause_record(
+                    connection,
+                    pause,
+                )
+                write_loop_pause(connection, ctx.loop_run, outcome.completed_at)
             return
 
         if decision_type in _RETRY_DECISIONS and outcome.retry_step is not None:
@@ -979,6 +1160,7 @@ async def run_workflow_async(
     goal_contract: GoalContract | None = None,
     on_event: ProviderEventCallback | None = None,
     driver_resolver: DriverResolver | None = None,
+    cancellation: CancellationToken | None = None,
 ) -> None:
     """Run the compiled workflow asynchronously and persist its loop ledger."""
     loop_run = load_loop_runs_for_session(connection, session_id)[-1]
@@ -1007,6 +1189,7 @@ async def run_workflow_async(
         created_at=created_at,
         on_event=on_event,
         driver_resolver=driver_resolver,
+        cancellation=cancellation,
     )
     state = LoopExecutionState(pending_steps=list(plan.steps))
     await _run_steps(ctx, state)
@@ -1022,18 +1205,27 @@ def run_workflow(
     goal_contract: GoalContract | None = None,
     on_event: ProviderEventCallback | None = None,
     driver_resolver: DriverResolver | None = None,
+    cancellation: CancellationToken | None = None,
 ) -> None:
     """Run the compiled workflow synchronously (CLI/tests entry point)."""
-    asyncio.run(
-        run_workflow_async(
-            connection,
-            session_id,
-            provider,
-            created_at=created_at,
-            compiled_plan=compiled_plan,
-            role_contracts=role_contracts,
-            goal_contract=goal_contract,
-            on_event=on_event,
-            driver_resolver=driver_resolver,
+    try:
+        asyncio.run(
+            run_workflow_async(
+                connection,
+                session_id,
+                provider,
+                created_at=created_at,
+                compiled_plan=compiled_plan,
+                role_contracts=role_contracts,
+                goal_contract=goal_contract,
+                on_event=on_event,
+                driver_resolver=driver_resolver,
+                cancellation=cancellation,
+            )
         )
-    )
+    except asyncio.CancelledError:
+        from curator.scheduler.recovery import reconcile
+
+        session = load_session(connection, session_id)
+        if session is not None:
+            reconcile(connection, session.project_root)

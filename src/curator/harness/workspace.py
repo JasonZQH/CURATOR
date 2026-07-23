@@ -52,15 +52,37 @@ def _is_git_repo(project_root: Path) -> bool:
     return result.returncode == 0 and result.stdout.strip() == "true"
 
 
+def _porcelain_path(line: str) -> str:
+    """Return the file path from one `git status --porcelain` line."""
+    # Format: "XY <path>", with renames written "XY old -> new".
+    path = line[3:].strip() if len(line) > 3 else line.strip()
+    if " -> " in path:
+        path = path.split(" -> ", 1)[1]
+    return path.strip('"')
+
+
+def _is_curator_state(path: str) -> bool:
+    """Return whether a status path is Curator's own local state directory."""
+    return path == ".curator" or path.startswith(".curator/")
+
+
 def capture_baseline(project_root: Path | str) -> WorkspaceBaseline:
-    """Record the git HEAD and cleanliness before a writer run."""
+    """Record the git HEAD and cleanliness before a writer run.
+
+    Curator's own `.curator/` state directory is excluded from the cleanliness
+    check so the tool never blocks a writer on the state it just created.
+    """
     root = Path(project_root)
     if not _is_git_repo(root):
         return WorkspaceBaseline(is_git_repo=False, head=None, clean=True)
 
     head = _git(root, "rev-parse", "HEAD")
     status = _git(root, "status", "--porcelain")
-    entries = [line for line in status.stdout.splitlines() if line.strip()]
+    entries = [
+        line
+        for line in status.stdout.splitlines()
+        if line.strip() and not _is_curator_state(_porcelain_path(line))
+    ]
     return WorkspaceBaseline(
         is_git_repo=True,
         head=head.stdout.strip() or None,
@@ -79,6 +101,48 @@ def require_clean_baseline(baseline: WorkspaceBaseline) -> None:
             "Workspace has uncommitted changes before provider run"
             + (f": {preview}" if preview else ".")
         )
+
+
+def stash_workspace(project_root: Path | str) -> str | None:
+    """Stash all uncommitted changes so the writer runs on a clean tree.
+
+    The opt-in convenience behind a `WorkspaceDirtyError` pause: instead of
+    forcing the user to commit or stash by hand, `/resume stash` calls this to
+    tuck their work away, giving the writer a clean baseline and an evidence
+    diff attributable to the writer alone. Curator's own `.curator/` state is
+    excluded from the stash by an explicit pathspec, matching capture_baseline's
+    exclusion rather than relying on the project happening to git-ignore it — so
+    the open sqlite ledger is never swept out from under the running loop.
+
+    Returns the stash ref when a stash was created, or None when there was
+    nothing to stash or the path is not a git repo. A failed/empty stash is
+    intentionally advisory: the caller's clean-tree guard re-fires and re-pauses
+    if the tree is still dirty, so the writer can never run on a dirty baseline.
+    The stash is NOT auto-restored: the user pops it (`git stash pop`) once the
+    delivery is reviewed.
+
+    ponytail: stash-only, no auto-pop. Auto-popping mid-loop risks a merge
+    conflict at an awkward moment if the writer touched the same files; deferring
+    the pop to the user keeps the run clean. Upgrade path: auto-pop after the
+    confirm gate once conflict handling exists.
+    """
+    root = Path(project_root)
+    if not _is_git_repo(root):
+        return None
+    result = _git(
+        root,
+        "stash",
+        "push",
+        "--include-untracked",
+        "-m",
+        "curator: auto-stash before writer run",
+        "--",
+        ".",
+        ":(exclude).curator",
+    )
+    if result.returncode != 0 or "No local changes to save" in result.stdout:
+        return None
+    return "stash@{0}"
 
 
 def _untracked_files(root: Path) -> list[str]:

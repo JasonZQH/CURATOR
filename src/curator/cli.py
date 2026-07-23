@@ -16,14 +16,16 @@ from curator.init.reset import (
     reset_curator_state,
 )
 from curator.diagnostics.doctor import inspect_project_health
+from curator.diagnostics.preflight import render_preflight, run_preflight
 from curator.diagnostics.status import inspect_project_status
 from curator.rendering.terminal import (
     render_contract_validation_report,
     render_doctor_report,
     render_status_report,
 )
-from curator.providers.setup import add_provider_profile
+from curator.providers.setup import add_provider_profile, resolve_provider_name
 from curator.shell.repl import run_interactive_shell
+from curator.shell.wizard import run_setup_wizard
 from curator.state.db import connect_database, initialize_database
 from curator.state.repositories import load_provider_profiles
 from curator.team.roles import validate_role_contracts
@@ -83,30 +85,30 @@ def main(
         is_eager=True,
         help="Show the Curator version and exit.",
     ),
-    yes: bool = typer.Option(
-        False,
-        "--yes",
-        "-y",
-        help="Approve non-interactive setup for top-level workflows.",
-    ),
     no_tui: bool = typer.Option(
         False,
         "--no-tui",
-        help="Print workflow output instead of launching the TUI.",
+        help="Use the plain line shell instead of the full-screen app.",
     ),
     gate: bool = typer.Option(
-        False,
-        "--gate",
-        help="Require proposal review before every request runs.",
+        True,
+        "--gate/--no-gate",
+        help="Require proposal review before every request runs (default: on).",
     ),
 ) -> None:
     """Start the Curator CLI shell for the current project."""
     _ = version
-    _ = yes
-    _ = no_tui
 
-    if context.invoked_subcommand is None:
+    if context.invoked_subcommand is not None:
+        return
+    import sys
+
+    if no_tui or not sys.stdin.isatty() or not sys.stdout.isatty():
         run_interactive_shell(Path.cwd(), gate=gate)
+        return
+    from curator.tui.shell_app import run_shell_app
+
+    run_shell_app(Path.cwd(), gate=gate)
 
 
 @app.command("init")
@@ -183,7 +185,10 @@ def reset_command(
 @app.command("doctor")
 def doctor_command() -> None:
     """Inspect local Curator setup without changing project state."""
-    typer.echo(render_doctor_report(inspect_project_health(Path.cwd())))
+    root = Path.cwd()
+    typer.echo(render_doctor_report(inspect_project_health(root)))
+    typer.echo("")
+    typer.echo(render_preflight(run_preflight(root)))
 
 
 @app.command("status")
@@ -201,13 +206,31 @@ def contract_validate_command() -> None:
         raise typer.Exit(1)
 
 
+@app.command("setup")
+def setup_command() -> None:
+    """Run the guided setup wizard: roles, providers, login, one consent."""
+    outcome = run_setup_wizard(Path.cwd())
+    typer.echo(outcome.message)
+    if not outcome.applied:
+        raise typer.Exit(1)
+
+
 @provider_app.command("add")
 def provider_add_command(
     name: str = typer.Argument(..., help="Provider to add: claude-code or codex."),
 ) -> None:
     """Detect a provider CLI and store a provider profile for it."""
-    _echo_init_write_summary(Path.cwd())
-    connection = connect_database(build_curator_paths(Path.cwd()).database)
+    if resolve_provider_name(name) is None:
+        typer.echo(f"Unknown provider: {name}. Use claude-code or codex.")
+        raise typer.Exit(1)
+    paths = build_curator_paths(Path.cwd())
+    if not paths.database.exists():
+        typer.echo(
+            "Curator is not initialized here. Run `curator init` first "
+            "(or `curator setup` for guided setup)."
+        )
+        raise typer.Exit(1)
+    connection = connect_database(paths.database)
     try:
         initialize_database(connection)
         result = add_provider_profile(connection, name)
@@ -217,7 +240,10 @@ def provider_add_command(
     if not result.created:
         raise typer.Exit(1)
     assert result.profile is not None
-    typer.echo("Next: bind a slot with /agent bind writer.default " + result.profile.id)
+    typer.echo(
+        "Next: run `curator`, then bind a slot with: /agent bind writer.default "
+        + result.profile.id
+    )
 
 
 @provider_app.command("list")

@@ -3,69 +3,186 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Curator Orchestration</title>
+  <title>Curator · Orchestration & Runtime Boundary</title>
+  <link rel="stylesheet" href="assets/curator-docs.css" />
 </head>
-<body>
-  <main>
-    <h1>Curator Orchestration</h1>
+<body id="top">
 
-    <section id="what">
-      <h2>What</h2>
+  <header class="masthead">
+    <a class="wordmark" href="#top"><span class="loop">↻</span><span class="name">Curator</span></a>
+    <span class="mast-spacer"></span>
+    <div class="phase-legend">
+      <span class="chip live">Live · Phase 0</span>
+      <span class="chip target">Target · V1</span>
+    </div>
+  </header>
+
+  <main class="page">
+    <div class="doc-head">
+      <span class="eyebrow">Runtime · Orchestration</span>
+      <h1>The control loop, and its boundary</h1>
+      <p class="dek">
+        Curator's Phase 0 turns an accepted goal into a durable, single-writer loop: a
+        <strong>deterministic scheduler</strong> — not the model — owns every transition, and
+        each step lands on a replayable SQLite ledger. This is where that loop is drawn, and
+        where the current implementation ends and the V1 blueprint begins.
+      </p>
+    </div>
+
+    <figure class="figure">
+      <div class="mermaid">
+flowchart LR
+  subgraph SCHED["DETERMINISTIC SCHEDULER — continue / retry / pause / stop / resume"]
+    direction LR
+    G(["Goal<br/><small>accepted</small>"]):::live --> W["Writer<br/><small>provider CLI</small>"]:::live --> V{"Verify<br/><small>deterministic</small>"}:::verify --> R["Review<br/><small>fresh context</small>"]:::review --> H{{"Human gate<br/><small>confirm</small>"}}:::gate --> D(["Done<br/><small>delivered</small>"]):::pass
+    V -- "validation fails" --> W
+    W -. "missing provider · dirty tree · handoff" .-> P["Pause"]:::gate
+    P -. "/resume" .-> W
+  end
+  SCHED ==> L[("Durable SQLite ledger<br/><small>iteration · decision · evidence · provider run · pause</small>")]:::ledger
+  classDef live fill:#0e1a33,stroke:#3b8cff,stroke-width:1.5px,color:#eaf1ff;
+  classDef verify fill:#0c2318,stroke:#43e2a4,stroke-width:1.5px,color:#d6ffe9;
+  classDef review fill:#170f2e,stroke:#8b5cf6,stroke-width:1.5px,color:#ece3ff;
+  classDef gate fill:#241a06,stroke:#ffc24b,stroke-width:1.5px,color:#ffe9bf;
+  classDef pass fill:#0c2b1d,stroke:#43e2a4,stroke-width:1.8px,color:#c9ffe6;
+  classDef ledger fill:#0a0f1f,stroke:#33406a,stroke-width:1.4px,color:#9fb0d6;
+      </div>
+      <div class="figure-cap"><b>Figure 1.</b><span>The Phase 0 single-writer loop. The scheduler owns continue, retry, pause, stop, and resume; providers only execute bounded role work.</span></div>
+      <div class="figure-legend">
+        <span class="leg"><span class="swatch" style="background:#3b8cff"></span>live step</span>
+        <span class="leg"><span class="swatch" style="background:#43e2a4"></span>deterministic verify</span>
+        <span class="leg"><span class="swatch" style="background:#8b5cf6"></span>fresh-context review</span>
+        <span class="leg"><span class="swatch" style="background:#ffc24b"></span>gate / pause</span>
+      </div>
+    </figure>
+
+    <section class="sec" id="what">
+      <div class="sec-eyebrow"><span class="mark">W</span> What</div>
+      <h2>A local control plane, not a chat wrapper</h2>
       <p>
-        Curator orchestration turns an accepted goal into a durable workflow session.
-        The implemented path is writer provider, deterministic verifier, fresh-context
-        reviewer provider, and human confirmation gate. Provider runs are ledgered with
-        provider identity, context package id, events, responses, evidence, and scheduler
-        decisions.
+        The repository implements a local Phase 0 control plane: an accepted goal becomes a
+        durable SQLite workflow session containing a writer run, deterministic verification,
+        a fresh-context review, and a human confirmation gate. The Excalidraw blueprint
+        describes the <em>next</em> runtime model — it is not a claim that the current branch
+        already has a task DAG or concurrent workers.
       </p>
     </section>
 
-    <section id="how">
-      <h2>How</h2>
+    <section class="sec" id="how">
+      <div class="sec-eyebrow"><span class="mark">H</span> How</div>
+      <h2>The current Phase 0 path</h2>
+      <p>Each stage in Figure 1 is owned by a specific module. The scheduler resolves a
+        provider driver per slot binding, packages context, and pauses rather than guessing
+        whenever a precondition is missing.</p>
       <pre><code>shell/repl.py
-  - records discussion, approval, provider setup commands, resume input
+  · records discussion, approval, provider setup, and resume input
 app.py
-  - creates accepted-goal workflow sessions
+  · creates accepted-goal workflow sessions
+loops/compiler.py
+  · compiles the fixed single-writer delivery template
 scheduler/engine.py
-  - builds context packages
-  - resolves provider drivers from slot bindings
-  - pauses on missing provider, dirty workspace, provider handoff, or missing verification
-providers/claude_code.py and providers/codex_cli.py
-  - render context package requests into real CLI prompts
-  - stream events and capture workspace evidence
+  · builds context packages and runs the sequential plan
+  · resolves provider drivers from slot bindings
+  · pauses on missing provider, dirty workspace, handoff, or missing verification
+providers/claude_code.py · providers/codex_cli.py
+  · render context packages into real CLI prompts
+  · stream provider events and capture workspace evidence
 harness/verifier.py
-  - discovers project verification commands
-  - records verification evidence
+  · discovers project verification commands and records deterministic evidence
 harness/workspace.py
-  - requires clean git baseline for writer runs
-  - records tracked diff and untracked files after provider execution</code></pre>
+  · requires a clean git baseline for writer runs
+  · records tracked diff and untracked files after provider execution</code></pre>
+
+      <h2>The blueprint target boundary</h2>
       <p>
-        Provider setup accepts only <code>claude-code</code> and <code>codex</code>.
+        The target separates business execution from a provider session. A durable
+        <code>Execution</code> owns one task attempt; every provider process or native TUI
+        session is an <code>AgentRuntime</code>, recorded by an <code>ExecutionRuntime</code>.
+        A runtime handoff keeps the same execution and attempt number while appending a new
+        runtime sequence. A user retry creates a new execution linked by
+        <code>retry_of_execution_id</code> and preserves the interrupted record.
+      </p>
+
+      <figure class="figure">
+        <div class="mermaid">
+flowchart LR
+  T["Task<br/><small>one attempt</small>"]:::live --> E1["Execution · attempt 1<br/><small>durable · owns the attempt</small>"]:::target
+  E1 --> A1["AgentRuntime seq.1<br/><small>live process / TUI</small>"]:::target
+  A1 -- "handoff · same execution, new runtime seq" --> A2["AgentRuntime seq.2"]:::target
+  E1 -. "retry_of_execution_id" .-> E2["Execution · attempt 2<br/><small>new record · prior kept read-only</small>"]:::target
+  A1 -.-> ER["ExecutionRuntime<br/><small>records each pairing</small>"]:::ledger
+  A2 -.-> ER
+  classDef live fill:#0e1a33,stroke:#3b8cff,stroke-width:1.5px,color:#eaf1ff;
+  classDef target fill:#140b22,stroke:#c77dff,stroke-width:1.5px,stroke-dasharray:5 4,color:#ecd9ff;
+  classDef ledger fill:#0a0f1f,stroke:#33406a,stroke-width:1.4px,color:#9fb0d6;
+        </div>
+        <div class="figure-cap"><b>Figure 2.</b><span>The V1 identity boundary — a migration target, not a Phase 0 capability.</span></div>
+        <div class="figure-legend">
+          <span class="leg"><span class="swatch" style="background:rgba(59,140,255,0.5);border:1px solid #3b8cff"></span>exists in Phase 0</span>
+          <span class="leg"><span class="swatch" style="border:1.5px dashed #c77dff;background:transparent"></span>V1 target</span>
+        </div>
+      </figure>
+
+      <p>
+        The target scheduler owns Project, Session, Goal, Task, Dependency, Agent, Provider,
+        Capability, Artifact, Memory, Approval, lease, heartbeat, and event state. It may run
+        independent ready tasks in parallel only after workspace ownership, permission scope,
+        concurrency limits, and recovery semantics exist. Control Desk is the
+        inspection/control surface; the concrete Claude Code or Codex TUI remains the native
+        execution surface.
+      </p>
+      <p>
+        Provider setup accepts only <code>claude-code</code> and <code>codex</code> in Phase 0.
         Detection requires the CLI binary to exist and <code>--version</code> to exit
-        successfully. Broken CLIs are not persisted as active provider profiles.
+        successfully; broken CLIs are never persisted as active profiles. The blueprint's
+        capability detection, authentication health, version compatibility, installation
+        registry, and native TUI lifecycle remain V1 work.
       </p>
     </section>
 
-    <section id="why">
-      <h2>Why</h2>
+    <section class="sec" id="why">
+      <div class="sec-eyebrow"><span class="mark">Y</span> Why</div>
+      <h2>Auditable without pretending chat is the record</h2>
       <p>
-        The orchestration boundary makes real provider behavior auditable. The scheduler
-        never assumes success from a missing provider, empty verifier, or pre-existing
-        dirty workspace. This gives users a basic reliable interaction standard: visible
-        setup requirements, typed failures, deterministic verification, inspectable
-        evidence, and explicit resume choices.
+        The boundary makes real provider behavior auditable without treating a provider
+        conversation as the system of record. Phase 0 already makes setup requirements, typed
+        failures, verification evidence, pauses, and resume choices visible. The blueprint
+        extends the same principle to task state transitions, capability invocations,
+        approvals, artifacts, runtime leases, heartbeats, and handoff snapshots.
       </p>
     </section>
 
-    <section id="future">
-      <h2>Future improvements/considerations/trade-offs</h2>
+    <section class="sec" id="future">
+      <div class="sec-eyebrow"><span class="mark">F</span> Future · considerations · trade-offs</div>
+      <h2>Migration order</h2>
       <ul>
-        <li>Support provider-specific structured result parsing for verification commands.</li>
-        <li>Add provider health scoring before automatic writer/reviewer selection.</li>
-        <li>Introduce explicit development fixtures without exposing them as user providers.</li>
-        <li>Offer a guarded dirty-workspace override with clear evidence partitioning.</li>
+        <li>Introduce the canonical Project/Goal/Task/Execution schema beside the Phase 0 ledger.</li>
+        <li>Add append-only events, worker leases, heartbeats, restart recovery, and a bounded retry policy.</li>
+        <li>Add filesystem-backed artifact and memory manifests; keep large logs and patches out of SQLite.</li>
+        <li>Define Provider Adapter and shell adapter contracts before adding tmux, Ghostty, or Warp integration.</li>
+        <li>Add capability install/status records and STRICT, BALANCED, AUTONOMOUS, and FULL_ACCESS policy evaluation.</li>
+        <li>Only then enable DAG scheduling and up to four concurrent local workers.</li>
       </ul>
     </section>
   </main>
+
+  <footer class="doc-foot">
+    <div class="foot-eyebrow">Curator documentation</div>
+    <nav class="doc-index">
+      <a class="current" href="orchestration.html"><span class="di-title">Orchestration &amp; runtime boundary</span><span class="di-desc">The Phase 0 control loop and the V1 blueprint boundary.</span></a>
+      <a href="provider-profile-layer.html"><span class="di-title">Provider &amp; runtime identity</span><span class="di-desc">Agent, Provider, AgentRuntime, and Execution.</span></a>
+      <a href="runtime-workspace-ui.html"><span class="di-title">Runtime workspace UI</span><span class="di-desc">The workbench today, the Control Desk target.</span></a>
+      <a href="shell-adapter-boundary.html"><span class="di-title">Shell adapter boundary</span><span class="di-desc">What shell may do vs the Python control plane.</span></a>
+      <a href="future-optimizations.html"><span class="di-title">Future optimizations</span><span class="di-desc">The evidence-driven runtime kernel backlog.</span></a>
+      <a href="v0-alpha-release-plan-v3.html"><span class="di-title">v0.1.0 release plan (v3)</span><span class="di-desc">Release gates and the V1.1–V1.6 ladder.</span></a>
+      <a href="v0-alpha-implementation-status.html"><span class="di-title">Implementation status</span><span class="di-desc">What PR1–PR5 actually landed.</span></a>
+      <a href="release-notes-v0.1.0.html"><span class="di-title">v0.1.0 release notes</span><span class="di-desc">What ships, and the known limits.</span></a>
+      <a href="orca-parallel-orchestration-and-task-memory.html"><span class="di-title">Parallel orchestration &amp; task memory</span><span class="di-desc">Orca's parallelism as evidence-backed state.</span></a>
+    </nav>
+    <div class="foot-meta"><span class="chip live">Phase 0</span> local · single-writer · sequential — the V1 blueprint is a migration target, not current capability.</div>
+  </footer>
+
+  <script src="assets/mermaid.min.js"></script>
+  <script src="assets/curator-mermaid.js"></script>
 </body>
 </html>

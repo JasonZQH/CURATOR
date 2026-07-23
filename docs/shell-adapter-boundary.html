@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Curator · Shell Adapter Boundary</title>
+  <link rel="stylesheet" href="assets/curator-docs.css" />
+</head>
+<body id="top">
+
+  <header class="masthead">
+    <a class="wordmark" href="#top"><span class="loop">↻</span><span class="name">Curator</span></a>
+    <span class="mast-spacer"></span>
+    <div class="phase-legend">
+      <span class="chip live">Live · Phase 0</span>
+      <span class="chip target">Target · V1</span>
+    </div>
+  </header>
+
+  <main class="page">
+    <div class="doc-head">
+      <span class="eyebrow">Boundary · Shell</span>
+      <h1>The shell adapter boundary</h1>
+      <p class="dek">
+        Shell is a good operating-system adapter — launch a provider, check prerequisites,
+        attach a tmux session, collect artifacts. It is <strong>not</strong> the authoritative
+        orchestration layer. State, transitions, approvals, leases, recovery, and audit events
+        stay owned by the Python control plane.
+      </p>
+    </div>
+
+    <figure class="figure">
+      <div class="mermaid">
+flowchart LR
+  subgraph PY1["PYTHON CONTROL PLANE"]
+    direction TB
+    V["validate policy · workspace · capability · lease"]:::live
+    S["write immutable input snapshot"]:::live
+    V --> S
+  end
+  A["adapter.sh<br/><small>start provider / tmux-backed runtime</small><br/><small>emit NDJSON · documented exit code</small>"]:::gate
+  subgraph PY2["PYTHON CONTROL PLANE"]
+    direction TB
+    R["record provider/runtime events, artifacts, failure, retry, handoff"]:::live
+    N["decide the next task state"]:::live
+    R --> N
+  end
+  PY1 -- "invoke with context + runtime refs" --> A -- "structured events + exit" --> PY2
+  classDef live fill:#0e1a33,stroke:#3b8cff,stroke-width:1.5px,color:#eaf1ff;
+  classDef gate fill:#241a06,stroke:#ffc24b,stroke-width:1.5px,color:#ffe9bf;
+      </div>
+      <div class="figure-cap"><b>Figure 1.</b><span>Shell is a thin, testable boundary between two Python-owned transactions.</span></div>
+      <div class="figure-legend">
+        <span class="leg"><span class="swatch" style="background:#3b8cff"></span>Python control plane</span>
+        <span class="leg"><span class="swatch" style="background:#ffc24b"></span>shell adapter (OS boundary)</span>
+      </div>
+    </figure>
+
+    <section class="sec" id="what">
+      <div class="sec-eyebrow"><span class="mark">W</span> What</div>
+      <h2>An OS adapter, not the orchestrator</h2>
+      <p>
+        Shell scripts are a useful operating-system adapter for launching a provider, checking
+        local prerequisites, creating or attaching a tmux session, and collecting filesystem
+        artifacts. They are not the authoritative orchestration layer. SQLite state, task
+        transitions, approval decisions, leases, recovery, and audit events remain owned by
+        the Python control plane.
+      </p>
+    </section>
+
+    <section class="sec" id="how">
+      <div class="sec-eyebrow"><span class="mark">H</span> How</div>
+      <h2>A thin contract with documented exits</h2>
+      <p>
+        A shell adapter should be a thin, testable boundary with an explicit contract: receive
+        a context-file path and workspace path, start one bounded provider/runtime process,
+        stream structured events or write an event manifest, preserve stdout and stderr
+        separately, forward signals to the process group, and return documented exit codes.
+        Python commits the corresponding event and state changes in a transaction.
+      </p>
+      <pre><code>Python control plane
+  · validates policy, workspace, capability, and lease
+  · writes immutable input snapshot
+  · invokes adapter.sh with context and runtime references
+adapter.sh
+  · starts provider or tmux-backed runtime
+  · emits NDJSON/events and exits with a documented code
+Python control plane
+  · records provider/runtime events, artifacts, failure, retry, or handoff
+  · decides the next task state</code></pre>
+      <div class="callout warn">
+        <strong>Hard boundary:</strong> the adapter must not silently mutate the ledger, decide
+        task ownership, bypass approval policy, or chain directly into another agent. Direct
+        shell-to-shell chaining would make failures and permissions invisible to the scheduler.
+        Project-provided scripts also need an explicit trust decision; they must not run merely
+        because they are present in the workspace.
+      </div>
+    </section>
+
+    <section class="sec" id="why">
+      <div class="sec-eyebrow"><span class="mark">Y</span> Why</div>
+      <h2>Each layer at its strength</h2>
+      <p>
+        This split uses the strength of each layer. Shell is good at portable process and
+        terminal operations, while Python is better suited to typed contracts, SQLite
+        transactions, concurrent scheduling, structured recovery, and provider-independent
+        policy. It also lets the same provider adapter work from a direct subprocess in
+        Phase 0 and from tmux/Ghostty/Warp runtimes in V1.
+      </p>
+    </section>
+
+    <section class="sec" id="future">
+      <div class="sec-eyebrow"><span class="mark">F</span> Future · considerations · trade-offs</div>
+      <h2>Before native TUI focus and handoff</h2>
+      <ul>
+        <li>Define stable exit codes for completed, provider error, approval required, retryable failure, and user interruption.</li>
+        <li>Use context files or stdin instead of putting prompts and secrets in process arguments.</li>
+        <li>Provide macOS/Linux compatibility checks for <code>flock</code>, process groups, tmux, and signal behavior.</li>
+        <li>Add contract tests with fake providers before enabling native TUI focus and handoff.</li>
+        <li>Keep shell scripts small; move stateful policy and recovery logic into Python services.</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="doc-foot">
+    <div class="foot-eyebrow">Curator documentation</div>
+    <nav class="doc-index">
+      <a href="orchestration.html"><span class="di-title">Orchestration &amp; runtime boundary</span><span class="di-desc">The Phase 0 control loop and the V1 blueprint boundary.</span></a>
+      <a href="provider-profile-layer.html"><span class="di-title">Provider &amp; runtime identity</span><span class="di-desc">Agent, Provider, AgentRuntime, and Execution.</span></a>
+      <a href="runtime-workspace-ui.html"><span class="di-title">Runtime workspace UI</span><span class="di-desc">The workbench today, the Control Desk target.</span></a>
+      <a class="current" href="shell-adapter-boundary.html"><span class="di-title">Shell adapter boundary</span><span class="di-desc">What shell may do vs the Python control plane.</span></a>
+      <a href="future-optimizations.html"><span class="di-title">Future optimizations</span><span class="di-desc">The evidence-driven runtime kernel backlog.</span></a>
+      <a href="v0-alpha-release-plan-v3.html"><span class="di-title">v0.1.0 release plan (v3)</span><span class="di-desc">Release gates and the V1.1–V1.6 ladder.</span></a>
+      <a href="v0-alpha-implementation-status.html"><span class="di-title">Implementation status</span><span class="di-desc">What PR1–PR5 actually landed.</span></a>
+      <a href="release-notes-v0.1.0.html"><span class="di-title">v0.1.0 release notes</span><span class="di-desc">What ships, and the known limits.</span></a>
+      <a href="orca-parallel-orchestration-and-task-memory.html"><span class="di-title">Parallel orchestration &amp; task memory</span><span class="di-desc">Orca's parallelism as evidence-backed state.</span></a>
+    </nav>
+    <div class="foot-meta"><span class="chip live">Phase 0</span> local · single-writer · sequential — the V1 blueprint is a migration target, not current capability.</div>
+  </footer>
+
+  <script src="assets/mermaid.min.js"></script>
+  <script src="assets/curator-mermaid.js"></script>
+</body>
+</html>
