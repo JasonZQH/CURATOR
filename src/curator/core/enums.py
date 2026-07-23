@@ -84,6 +84,7 @@ class ProviderErrorKind(str, Enum):
     PERMISSION_DENIED = "permission_denied"
     INVALID_OUTPUT = "invalid_output"
     PROVIDER_UNAVAILABLE = "provider_unavailable"
+    USAGE_LIMIT = "usage_limit"
 
 
 class PauseStatus(str, Enum):

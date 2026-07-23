@@ -10,6 +10,7 @@ from curator.providers.cli_common import build_cli_provider_response, usage_toke
 from curator.providers.contracts import ProviderRunRequest, ProviderRunResponse
 from curator.providers.driver import SubprocessDriver
 from curator.providers.events import OUTPUT_CHUNK_MAX_CHARS, ProviderEvent, ProviderEventKind
+from curator.providers.limits import is_usage_limit, usage_limit_message
 from curator.providers.redact import redact_secrets
 from curator.runtime.action_policy import ActionPolicy
 from curator.runtime.permissions import claude_permission_args
@@ -110,6 +111,12 @@ class ClaudeCodeDriver(SubprocessDriver):
     ) -> ProviderRunResponse:
         """Convert the observed Claude Code run into a typed response."""
         if returncode != 0:
+            if is_usage_limit(stderr_tail):
+                return self._failed_response(
+                    request,
+                    ProviderErrorKind.USAGE_LIMIT,
+                    usage_limit_message("Claude Code", stderr_tail),
+                )
             error_kind = (
                 ProviderErrorKind.PERMISSION_DENIED
                 if "not logged in" in stderr_tail.lower() or "auth" in stderr_tail.lower()

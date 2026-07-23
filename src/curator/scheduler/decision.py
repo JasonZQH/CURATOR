@@ -6,6 +6,7 @@ from curator.core.enums import (
     HarnessStatus,
     LoopDecisionType,
     LoopStepType,
+    ProviderErrorKind,
     StepExecutorType,
     StopCondition,
 )
@@ -51,6 +52,14 @@ def _failed_response_decision(step: CompiledLoopStep, result: HarnessRunResult) 
     """Return the decision for a provider response that reported failure."""
     error_kind = str(result.metadata.get("error_kind", ""))
     error_message = str(result.metadata.get("error_message") or "Provider reported a failed run.")
+    if error_kind == ProviderErrorKind.USAGE_LIMIT.value:
+        # Relay the provider's own limit message verbatim (it already names the provider and
+        # any reset time) and tell the user exactly how to continue once the limit clears.
+        return RuntimeDecision(
+            decision=LoopDecisionType.HUMAN_HANDOFF,
+            stop_condition=StopCondition.HUMAN_HANDOFF_REQUESTED,
+            reason=f"{error_message}. Wait for the reset, then /resume to retry.",
+        )
     if error_kind in _PAUSED_ERROR_KINDS:
         return RuntimeDecision(
             decision=LoopDecisionType.HUMAN_HANDOFF,
