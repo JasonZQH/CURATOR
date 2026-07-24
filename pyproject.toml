@@ -50,7 +50,7 @@ curator = "curator.cli:app"
 [dependency-groups]
 dev = [
   "pytest>=8.2",
-  "ruff>=0.5",
+  "ruff>=0.16.0",
 ]
 
 [tool.hatch.build.targets.wheel]
