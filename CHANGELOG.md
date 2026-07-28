@@ -4,6 +4,32 @@ All notable changes to Curator are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] — 2026-07-28
+
+### Added
+- **The ledger is backed up before a schema migration.** Opening `.curator/` with a newer
+  Curator applies pending migrations automatically; it now copies the ledger to
+  `.curator/archive/…-pre-migration.sqlite` first. The copy uses SQLite's online backup
+  API rather than a file copy, so data still sitting in the write-ahead log is preserved.
+  A ledger with nothing to migrate — the usual case, since every command opens it — is not
+  copied.
+- **`curator doctor` reports pending migrations and the newest backup.** It lists what the
+  next open will apply without applying it, and prints a ready-to-paste `cp` command to
+  restore the most recent backup. The backup lookup reads the directory, not the ledger, so
+  it still answers when the ledger will not open.
+
+### Fixed
+- **A failed backup is never offered as a restore point.** `sqlite3.connect` creates the
+  destination up front, so a backup interrupted by a full disk, an I/O error, or a killed
+  process left a truncated file carrying the real name. Being the newest, it became what
+  `curator doctor` advertised as the ledger to restore — and copying it over a live ledger
+  would have destroyed it. Backups are now written under a name the restore path ignores and
+  renamed into place only once complete, and an unusable file is never advertised.
+- **A failed migration no longer leaves a half-migrated ledger.** Pending migrations and
+  their `schema_version` rows now share one transaction, so a failure rolls the schema
+  changes back with it instead of stopping in an intermediate state and raises
+  `CuratorStateError`. Previously each migration committed on its own.
+
 ## [0.1.1] — 2026-07-28
 
 ### Fixed
@@ -54,5 +80,6 @@ Serial single-writer (local `flock`, no cross-host coordination); the decisions/
 — not the provider transcript — are the system of record; macOS primary, Linux in CI, Windows
 via WSL2 only.
 
+[0.1.2]: https://github.com/JasonZQH/CURATOR/releases/tag/v0.1.2
 [0.1.1]: https://github.com/JasonZQH/CURATOR/releases/tag/v0.1.1
 [0.1.0]: https://github.com/JasonZQH/CURATOR/releases/tag/v0.1.0

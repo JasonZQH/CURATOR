@@ -70,11 +70,11 @@ curl -fsSL https://raw.githubusercontent.com/JasonZQH/CURATOR/main/install.sh | 
 Or with pipx / uv:
 
 ```bash
-pipx install "git+https://github.com/JasonZQH/CURATOR.git@v0.1.1"
-uvx --from "git+https://github.com/JasonZQH/CURATOR.git@v0.1.1" curator
+pipx install "git+https://github.com/JasonZQH/CURATOR.git@v0.1.2"
+uvx --from "git+https://github.com/JasonZQH/CURATOR.git@v0.1.2" curator
 ```
 
-> Pin a released tag (`@v0.1.1`) for a reproducible install, or drop it to track `main`.
+> Pin a released tag (`@v0.1.2`) for a reproducible install, or drop it to track `main`.
 > On Windows, run inside WSL2.
 
 **Open it** — from any project directory:
@@ -106,8 +106,9 @@ Small requests start immediately; `/gate on` reviews the goal proposal first.
 
 | Version | Status | What it is |
 |---|---|---|
-| **v0.1.1** | Current | Patch on Phase 0. A Codex tool call is counted once rather than once per lifecycle event, so the activity block no longer reads ~2× high. Docs numbering folded onto a single `v0.1.x` roadmap. |
-| v0.1.0 | Previous | Phase 0 — local · single-writer · sequential. `Goal → writer → deterministic verifier → fresh-context reviewer → human confirm`, on a durable SQLite ledger. Opt-in `/resume stash` for the clean-tree guard. |
+| **v0.1.2** | Current | Migration safety. Upgrading backs the ledger up before any schema migration touches it, migrations apply as one all-or-nothing transaction, and `curator doctor` shows what is pending plus how to restore. |
+| v0.1.1 | Previous | Patch on Phase 0. A Codex tool call is counted once rather than once per lifecycle event, so the activity block no longer reads ~2× high. Docs numbering folded onto a single `v0.1.x` roadmap. |
+| v0.1.0 | | Phase 0 — local · single-writer · sequential. `Goal → writer → deterministic verifier → fresh-context reviewer → human confirm`, on a durable SQLite ledger. Opt-in `/resume stash` for the clean-tree guard. |
 
 v0.1.0 highlights: full-screen first-run trust & setup, keyboard-selectable slash commands and
 proposal actions, PM/Engineer/Reviewer seat labels, persistent history with Tab completion and
@@ -138,7 +139,7 @@ Full history in [CHANGELOG.md](CHANGELOG.md).
 | `curator provider add <name>` | Detect and register a provider CLI (`claude-code` / `codex`) |
 | `curator provider list` | List configured provider profiles |
 | `curator status` | Show current project state |
-| `curator doctor` | Run environment and readiness checks |
+| `curator doctor` | Run environment and readiness checks, including pending schema migrations |
 | `curator reset` | Archive the ledger and clear runtime state (`--hard` removes `.curator/`) |
 | `curator contract validate` | Validate editable role contracts |
 | `curator --version` | Print the version |
@@ -156,6 +157,16 @@ Full history in [CHANGELOG.md](CHANGELOG.md).
 `/help` is task-oriented (what to do next); `/help all` lists every command. The full-screen
 TUI adds Up/Down history, Tab completion, Shift+Enter/Ctrl+J continuation lines, Esc
 interruption, and two-stage Ctrl+C shutdown.
+
+**Upgrades and your ledger.** Opening `.curator/` with a newer Curator applies any pending
+schema migrations automatically. Before it touches anything, the ledger is copied to
+`.curator/archive/…-pre-migration.sqlite`, and the migration runs as a single transaction —
+if it fails, the ledger is left exactly as it was. `curator doctor` shows what is pending
+before it runs and, afterwards, prints the newest backup with the command to restore it:
+
+```bash
+cp .curator/archive/curator-<timestamp>-pre-migration.sqlite .curator/curator.sqlite
+```
 
 ## Known limitations
 
