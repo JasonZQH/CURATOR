@@ -4,6 +4,7 @@ import asyncio
 
 from textual.widgets import Input, Static
 
+from curator import __version__
 from curator.tui.reflow_log import ReflowRichLog
 from curator.tui.shell_app import CuratorShellApp
 from fakes import enable_live_mode
@@ -60,7 +61,7 @@ def test_shell_app_starts_with_banner_and_setup_status(tmp_path):
         async with app.run_test() as pilot:
             await pilot.pause()
             status = str(app.query_one("#status", Static).content)
-            assert any("curator v0.1.0" in block for block in app.transcript)
+            assert any(f"curator v{__version__}" in block for block in app.transcript)
             assert "setup" in status
             assert "gate:on" in status
 

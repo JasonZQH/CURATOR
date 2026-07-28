@@ -8,6 +8,7 @@ from pathlib import Path
 import yaml
 from typer.testing import CliRunner
 
+from curator import __version__
 from curator.core.enums import (
     ProviderBindingStatus,
     ProviderName,
@@ -82,7 +83,7 @@ def test_curator_cli_starts_with_version():
     result = runner.invoke(app, ["--version"])
 
     assert result.exit_code == 0
-    assert "curator 0.1.0" in result.stdout
+    assert f"curator {__version__}" in result.stdout
 
 
 def test_pyproject_exposes_only_curator_script():
@@ -90,6 +91,17 @@ def test_pyproject_exposes_only_curator_script():
     pyproject = tomllib.loads((Path(__file__).parents[1] / "pyproject.toml").read_text())
 
     assert pyproject["project"]["scripts"] == {"curator": "curator.cli:app"}
+
+
+def test_packaged_version_matches_the_module_version():
+    """Verify a release bump moves pyproject and __version__ together.
+
+    The two are declared separately, so a bump that touches only one would ship a wheel
+    whose metadata disagrees with what `curator --version` and the banner report.
+    """
+    pyproject = tomllib.loads((Path(__file__).parents[1] / "pyproject.toml").read_text())
+
+    assert pyproject["project"]["version"] == __version__
 
 
 def test_bare_curator_opens_natural_language_shell(tmp_path, monkeypatch):
@@ -100,7 +112,7 @@ def test_bare_curator_opens_natural_language_shell(tmp_path, monkeypatch):
     result = runner.invoke(app, [], input="/quit\n")
 
     assert result.exit_code == 0
-    assert "curator v0.1.0" in result.stdout
+    assert f"curator v{__version__}" in result.stdout
     assert "Next:" in result.stdout
 
 
@@ -112,7 +124,7 @@ def test_bare_curator_shows_banner_identity(tmp_path, monkeypatch):
     result = runner.invoke(app, [], input="/quit\n")
 
     assert result.exit_code == 0
-    assert "curator v0.1.0" in result.stdout
+    assert f"curator v{__version__}" in result.stdout
     assert "____" in result.stdout
 
 

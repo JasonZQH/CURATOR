@@ -143,6 +143,7 @@ class CuratorShellApp(App[None]):
         self._tool_group_type: str | None = None
         self._tool_group_count = 0
         self._tool_group_detail = ""
+        self._tool_group_ids: set[str] = set()
         self._menu: MenuSpec | None = None
         self._menu_index = 0
         self._trust_required = _should_check_trust()
@@ -338,10 +339,23 @@ class CuratorShellApp(App[None]):
         self._write(render_provider_event(event), True)
 
     def _note_tool_call(self, event: ProviderEvent) -> None:
-        """Fold one tool call into the live activity block, coalescing same-type calls."""
+        """Fold one tool call into the live activity block, coalescing same-type calls.
+
+        A provider that reports a tool call's lifecycle (Codex sends item.started, then
+        item.completed for the same ``item_id``) would otherwise read several calls high,
+        so a repeated id only refreshes the detail — the later event carries the fuller
+        one, e.g. a non-zero exit code. Providers that emit one event per call (Claude
+        Code) send no id and every event counts.
+        """
         label = event.label or "tool"
         detail = str(event.payload.get("detail", "")).strip()
+        item_id = str(event.payload.get("item_id", ""))
         if self._tool_group_type == label:
+            if item_id and item_id in self._tool_group_ids:
+                if detail:
+                    self._tool_group_detail = detail
+                self._render_tool_activity()
+                return
             self._tool_group_count += 1
             if detail:
                 self._tool_group_detail = detail
@@ -350,6 +364,8 @@ class CuratorShellApp(App[None]):
             self._tool_group_type = label
             self._tool_group_count = 1
             self._tool_group_detail = detail
+        if item_id:
+            self._tool_group_ids.add(item_id)
         self._render_tool_activity()
 
     def _render_tool_activity(self) -> None:
@@ -376,6 +392,7 @@ class CuratorShellApp(App[None]):
         self._tool_group_type = None
         self._tool_group_count = 0
         self._tool_group_detail = ""
+        self._tool_group_ids.clear()
         head = f"[{_TOOL_ACCENT}]{_TOOL_GLYPH} {escape_markup(label)}[/]"
         if count > 1:
             summary = f"{head} [{_TOOL_DIM}]· {count} calls[/]"
