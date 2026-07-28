@@ -4,7 +4,7 @@ All notable changes to Curator are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.1] — 2026-07-28
 
 ### Fixed
 - **Codex tool-call counts in the activity block.** One Codex command emits several
@@ -54,4 +54,5 @@ Serial single-writer (local `flock`, no cross-host coordination); the decisions/
 — not the provider transcript — are the system of record; macOS primary, Linux in CI, Windows
 via WSL2 only.
 
+[0.1.1]: https://github.com/JasonZQH/CURATOR/releases/tag/v0.1.1
 [0.1.0]: https://github.com/JasonZQH/CURATOR/releases/tag/v0.1.0

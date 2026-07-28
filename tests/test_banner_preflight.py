@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 
+from curator import __version__
 from curator.app import start_goal_loop
 from curator.core.paths import build_curator_paths
 from curator.diagnostics import preflight as preflight_module
@@ -49,7 +50,7 @@ def test_render_banner_shows_identity_line(tmp_path):
     banner = render_banner(tmp_path)
 
     assert "____" in banner
-    assert "curator v0.1.0" in banner
+    assert f"curator v{__version__}" in banner
     assert tmp_path.name in banner
 
 

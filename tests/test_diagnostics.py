@@ -1,5 +1,6 @@
 """Verify Curator diagnostics use cases and terminal renderers."""
 
+from curator import __version__
 from curator.core.paths import build_curator_paths
 from curator.app import run_workflow_snapshot, write_init_state
 from curator.diagnostics.doctor import inspect_project_health
@@ -13,7 +14,7 @@ def test_doctor_reports_missing_state_for_uninitialized_project(tmp_path):
     report = inspect_project_health(tmp_path)
 
     assert report.project_root == tmp_path
-    assert report.package_version == "0.1.0"
+    assert report.package_version == __version__
     assert report.state_dir == tmp_path / ".curator"
     assert report.database == tmp_path / ".curator" / "curator.sqlite"
     assert report.initialized is False
