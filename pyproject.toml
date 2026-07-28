@@ -63,3 +63,11 @@ pythonpath = ["src"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+# Pin the rule set explicitly. Without this, the project inherits whatever Ruff's
+# defaults happen to be, so "lint clean" changes meaning on a Ruff upgrade rather
+# than on a decision here — 0.16.0 widened the defaults and surfaced 84 findings in
+# unchanged code. These four are Ruff's classic defaults and are exactly what CI
+# enforced before the pin. Widening the set is a deliberate, separate change.
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
