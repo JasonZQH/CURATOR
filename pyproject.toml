@@ -32,7 +32,7 @@ classifiers = [
   "Topic :: Software Development :: Quality Assurance",
 ]
 dependencies = [
-  "typer>=0.12",
+  "typer>=0.27.0",
   "textual>=8.2.8,<9",
   "rich>=13.7",
   "pydantic>=2.8",
@@ -50,7 +50,7 @@ curator = "curator.cli:app"
 [dependency-groups]
 dev = [
   "pytest>=8.2",
-  "ruff>=0.5",
+  "ruff>=0.16.0",
 ]
 
 [tool.hatch.build.targets.wheel]
