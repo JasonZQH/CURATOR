@@ -1,13 +1,19 @@
 # Keeps GitHub Actions and Python (uv) dependencies fresh. The github-actions
 # updates also handle version drift on the Actions pinned in CI, so we don't
 # hand-pin them to commit SHAs.
+#
+# target-branch is set on every entry because Dependabot otherwise opens against the
+# default branch (main), while CONTRIBUTING requires PRs to be based on dev. Without
+# it, a merged bump lands on main only and dev's CI keeps testing the old version.
 version: 2
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
   - package-ecosystem: "uv"
     directory: "/"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
