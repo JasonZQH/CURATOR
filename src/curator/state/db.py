@@ -1,11 +1,24 @@
 """Manage SQLite connections and database initialization."""
 
 import sqlite3
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Callable
 
+from curator.core.errors import CuratorStateError
+from curator.state.backup import backup_ledger
 from curator.state.migrations import phase0_schema_sql
+
+
+@dataclass(frozen=True)
+class MigrationOutcome:
+    """Describe the schema migrations one initialization actually applied."""
+
+    applied: tuple[int, ...]
+    from_version: int
+    to_version: int
+    backup: Path | None = None
 
 
 class CuratorConnection(sqlite3.Connection):
@@ -96,25 +109,88 @@ VERSIONED_MIGRATIONS: tuple[tuple[int, Callable[[sqlite3.Connection], None]], ..
 )
 
 
-def _apply_versioned_migrations(connection: sqlite3.Connection) -> None:
-    """Run numbered migrations that are not yet recorded in schema_version."""
-    applied = {
-        row["version"]
-        for row in connection.execute("select version from schema_version").fetchall()
-    }
-    for version, migration in VERSIONED_MIGRATIONS:
-        if version in applied:
-            continue
+def applied_migrations(connection: sqlite3.Connection) -> set[int]:
+    """Return the migration versions this ledger has already recorded.
 
-        migration(connection)
-        connection.execute(
-            "insert into schema_version (version, applied_at) values (?, ?)",
-            (version, datetime.now(UTC).isoformat()),
-        )
+    A ledger old enough to predate the schema_version table has recorded nothing, which is
+    a valid state to migrate from rather than an error — and this is called from read-only
+    callers like doctor that never create the table.
+    """
+    try:
+        rows = connection.execute("select version from schema_version").fetchall()
+    except sqlite3.OperationalError:
+        return set()
+    return {row["version"] for row in rows}
 
 
-def initialize_database(connection: sqlite3.Connection) -> None:
-    """Create the Phase 0 SQLite tables and apply pending migrations."""
+def pending_migrations(connection: sqlite3.Connection) -> list[int]:
+    """Return the migration versions this ledger has not applied yet, in order."""
+    already = applied_migrations(connection)
+    return [version for version, _ in VERSIONED_MIGRATIONS if version not in already]
+
+
+def _apply_versioned_migrations(connection: sqlite3.Connection, pending: list[int]) -> None:
+    """Apply pending migrations as one all-or-nothing unit.
+
+    Every migration and its schema_version row share a single transaction: SQLite rolls
+    DDL back with everything else, so a failure half way through leaves the ledger exactly
+    as it was rather than in a state no version of Curator is written to read.
+    """
+    migrations = dict(VERSIONED_MIGRATIONS)
+    connection.begin_transaction()
+    try:
+        for version in pending:
+            migrations[version](connection)
+            connection.execute(
+                "insert into schema_version (version, applied_at) values (?, ?)",
+                (version, datetime.now(UTC).isoformat()),
+            )
+        connection.commit_transaction()
+    except Exception as error:
+        connection.rollback_transaction()
+        raise CuratorStateError(f"schema migration failed and was rolled back: {error}") from error
+
+
+def _ledger_database_path(connection: sqlite3.Connection) -> Path | None:
+    """Return the file backing this connection, or None for an in-memory ledger."""
+    for row in connection.execute("pragma database_list").fetchall():
+        if row["name"] == "main" and row["file"]:
+            return Path(row["file"])
+    return None
+
+
+def _ledger_has_content(connection: sqlite3.Connection) -> bool:
+    """Report whether this ledger already holds objects worth preserving."""
+    row = connection.execute("select count(*) as count from sqlite_master").fetchone()
+    return bool(row["count"])
+
+
+def initialize_database(connection: sqlite3.Connection) -> MigrationOutcome | None:
+    """Create the Phase 0 SQLite tables and apply pending migrations.
+
+    Returns what was migrated, or None when the ledger was already current — which is the
+    common case, since every command that opens the ledger lands here. An existing ledger
+    with work to do is copied to .curator/archive/ first, before anything writes to it.
+    """
+    pending = pending_migrations(connection)
+    previous = max(applied_migrations(connection), default=0)
+
+    backup: Path | None = None
+    if pending and _ledger_has_content(connection):
+        database_path = _ledger_database_path(connection)
+        if database_path is not None:
+            backup = backup_ledger(connection, database_path.parent)
+
     connection.executescript(phase0_schema_sql())
-    _apply_versioned_migrations(connection)
+    if pending:
+        _apply_versioned_migrations(connection, pending)
     connection.commit()
+
+    if not pending:
+        return None
+    return MigrationOutcome(
+        applied=tuple(pending),
+        from_version=previous,
+        to_version=max(pending),
+        backup=backup,
+    )
