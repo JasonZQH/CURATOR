@@ -20,8 +20,29 @@ def render_doctor_report(report: DoctorReport) -> str:
         f"State: {report.checks['state'].status}",
         f"Database: {report.checks['database'].status}",
         f"Mode: {report.mode}",
-        f"Recommended next step: {report.recommended_next_step}",
     ]
+    migrations = report.checks.get("migrations")
+    if migrations is not None and migrations.status != "missing":
+        lines.append(f"Migrations: {migrations.status} — {migrations.detail}")
+    backup = report.checks.get("backup")
+    if backup is not None and backup.status == "ok":
+        lines.append(f"Backup: {backup.detail}")
+    lines.append(f"Recommended next step: {report.recommended_next_step}")
+    return "\n".join(lines)
+
+
+def render_migration_outcome(outcome) -> str:
+    """Render what a just-applied migration did, or "" when nothing was migrated.
+
+    Migrating a ledger is not something to do silently: the user should learn that their
+    schema moved and where the copy of the old one is, at the moment it happens.
+    """
+    if outcome is None:
+        return ""
+    versions = ", ".join(str(version) for version in outcome.applied)
+    lines = [f"Migrated ledger: schema v{outcome.from_version} → v{outcome.to_version} ({versions})."]
+    if outcome.backup is not None:
+        lines.append(f"Previous ledger backed up to {outcome.backup}")
     return "\n".join(lines)
 
 

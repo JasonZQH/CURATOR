@@ -21,6 +21,7 @@ from curator.diagnostics.status import inspect_project_status
 from curator.rendering.terminal import (
     render_contract_validation_report,
     render_doctor_report,
+    render_migration_outcome,
     render_status_report,
 )
 from curator.providers.setup import add_provider_profile, resolve_provider_name
@@ -64,6 +65,13 @@ def _echo_init_summary(created_files_count: int, skipped_files_count: int) -> No
     typer.echo("Created Curator state")
     typer.echo(f"Created files: {created_files_count}")
     typer.echo(f"Skipped existing files: {skipped_files_count}")
+
+
+def _echo_migration(outcome) -> None:
+    """Print the migration notice when opening the ledger actually migrated it."""
+    message = render_migration_outcome(outcome)
+    if message:
+        typer.echo(message)
 
 
 def _ensure_curator_state(root: Path, yes: bool) -> None:
@@ -232,10 +240,11 @@ def provider_add_command(
         raise typer.Exit(1)
     connection = connect_database(paths.database)
     try:
-        initialize_database(connection)
+        migration = initialize_database(connection)
         result = add_provider_profile(connection, name)
     finally:
         connection.close()
+    _echo_migration(migration)
     typer.echo(result.message)
     if not result.created:
         raise typer.Exit(1)
@@ -255,10 +264,11 @@ def provider_list_command() -> None:
         return
     connection = connect_database(paths.database)
     try:
-        initialize_database(connection)
+        migration = initialize_database(connection)
         profiles = load_provider_profiles(connection)
     finally:
         connection.close()
+    _echo_migration(migration)
     if not profiles:
         typer.echo("Providers:\n- none (run curator provider add <name>)")
         return

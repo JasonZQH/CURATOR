@@ -138,7 +138,7 @@ Full history in [CHANGELOG.md](CHANGELOG.md).
 | `curator provider add <name>` | Detect and register a provider CLI (`claude-code` / `codex`) |
 | `curator provider list` | List configured provider profiles |
 | `curator status` | Show current project state |
-| `curator doctor` | Run environment and readiness checks |
+| `curator doctor` | Run environment and readiness checks, including pending schema migrations |
 | `curator reset` | Archive the ledger and clear runtime state (`--hard` removes `.curator/`) |
 | `curator contract validate` | Validate editable role contracts |
 | `curator --version` | Print the version |
@@ -156,6 +156,16 @@ Full history in [CHANGELOG.md](CHANGELOG.md).
 `/help` is task-oriented (what to do next); `/help all` lists every command. The full-screen
 TUI adds Up/Down history, Tab completion, Shift+Enter/Ctrl+J continuation lines, Esc
 interruption, and two-stage Ctrl+C shutdown.
+
+**Upgrades and your ledger.** Opening `.curator/` with a newer Curator applies any pending
+schema migrations automatically. Before it touches anything, the ledger is copied to
+`.curator/archive/…-pre-migration.sqlite`, and the migration runs as a single transaction —
+if it fails, the ledger is left exactly as it was. `curator doctor` shows what is pending
+before it runs and, afterwards, prints the newest backup with the command to restore it:
+
+```bash
+cp .curator/archive/curator-<timestamp>-pre-migration.sqlite .curator/curator.sqlite
+```
 
 ## Known limitations
 

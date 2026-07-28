@@ -8,7 +8,8 @@ from curator import __version__
 from curator.core.paths import build_curator_paths
 from curator.diagnostics.models import DoctorCheck, DoctorReport
 from curator.providers.profiles import resolve_runtime_mode
-from curator.state.db import connect_database
+from curator.state.backup import latest_pre_migration_backup
+from curator.state.db import connect_database, pending_migrations
 
 
 def _check_existing_path(path: Path, ok_detail: str, missing_detail: str) -> DoctorCheck:
@@ -56,7 +57,53 @@ def inspect_project_health(project_root: Path | str) -> DoctorReport:
             "package": DoctorCheck(status="ok", detail=f"curator {__version__}"),
             "state": state_check,
             "database": database_check,
+            "migrations": _migrations_check(paths.database) if initialized else _NO_LEDGER_CHECK,
+            "backup": _backup_check(paths.curator_dir),
         },
+    )
+
+
+_NO_LEDGER_CHECK = DoctorCheck(status="missing", detail="No ledger yet.")
+
+
+def _migrations_check(database: Path) -> DoctorCheck:
+    """Report which migrations the next open will apply, without applying them."""
+    try:
+        connection = connect_database(database)
+        try:
+            pending = pending_migrations(connection)
+        finally:
+            connection.close()
+    except sqlite3.DatabaseError as error:
+        return DoctorCheck(status="fail", detail=f"Cannot read the ledger: {error}")
+
+    if not pending:
+        return DoctorCheck(status="ok", detail="Schema is current.")
+
+    versions = ", ".join(str(version) for version in pending)
+    return DoctorCheck(
+        status="pending",
+        detail=(
+            f"{len(pending)} migration(s) pending ({versions}); the next command that opens "
+            "the ledger applies them, backing it up to .curator/archive/ first."
+        ),
+    )
+
+
+def _backup_check(curator_dir: Path) -> DoctorCheck:
+    """Point at the newest pre-migration backup and how to restore it.
+
+    Reads the directory rather than the ledger, so this still answers when the ledger will
+    not open — which is when someone actually needs it.
+    """
+    backup = latest_pre_migration_backup(curator_dir)
+    if backup is None:
+        return DoctorCheck(status="none", detail="No pre-migration backup taken yet.")
+
+    database = curator_dir / "curator.sqlite"
+    return DoctorCheck(
+        status="ok",
+        detail=f"Newest pre-migration backup: {backup}\n  restore: cp {backup} {database}",
     )
 
 

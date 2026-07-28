@@ -4,6 +4,26 @@ All notable changes to Curator are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **The ledger is backed up before a schema migration.** Opening `.curator/` with a newer
+  Curator applies pending migrations automatically; it now copies the ledger to
+  `.curator/archive/…-pre-migration.sqlite` first. The copy uses SQLite's online backup
+  API rather than a file copy, so data still sitting in the write-ahead log is preserved.
+  A ledger with nothing to migrate — the usual case, since every command opens it — is not
+  copied.
+- **`curator doctor` reports pending migrations and the newest backup.** It lists what the
+  next open will apply without applying it, and prints a ready-to-paste `cp` command to
+  restore the most recent backup. The backup lookup reads the directory, not the ledger, so
+  it still answers when the ledger will not open.
+
+### Fixed
+- **A failed migration no longer leaves a half-migrated ledger.** Pending migrations and
+  their `schema_version` rows now share one transaction, so a failure rolls the schema
+  changes back with it instead of stopping in an intermediate state and raises
+  `CuratorStateError`. Previously each migration committed on its own.
+
 ## [0.1.1] — 2026-07-28
 
 ### Fixed

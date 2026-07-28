@@ -2,11 +2,12 @@
 
 import shutil
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 
 from curator.core.paths import build_curator_paths
 from curator.core.schema import CuratorPaths
+from curator.state.backup import archive_stamp, ledger_archive_dir
 
 
 @dataclass(frozen=True)
@@ -67,10 +68,9 @@ def reset_curator_state(
 
     archived_database = None
     if paths.database.exists():
-        stamp = (now or datetime.now(UTC)).strftime("%Y%m%dT%H%M%SZ")
-        archive_dir = paths.curator_dir / "archive"
+        archive_dir = ledger_archive_dir(paths.curator_dir)
         archive_dir.mkdir(parents=True, exist_ok=True)
-        archived_database = archive_dir / f"curator-{stamp}.sqlite"
+        archived_database = archive_dir / f"curator-{archive_stamp(now)}.sqlite"
         shutil.move(str(paths.database), str(archived_database))
 
     removed_paths = []
