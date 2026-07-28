@@ -70,11 +70,11 @@ curl -fsSL https://raw.githubusercontent.com/JasonZQH/CURATOR/main/install.sh | 
 Or with pipx / uv:
 
 ```bash
-pipx install "git+https://github.com/JasonZQH/CURATOR.git@v0.1.0"
-uvx --from "git+https://github.com/JasonZQH/CURATOR.git@v0.1.0" curator
+pipx install "git+https://github.com/JasonZQH/CURATOR.git@v0.1.1"
+uvx --from "git+https://github.com/JasonZQH/CURATOR.git@v0.1.1" curator
 ```
 
-> Pin a released tag (`@v0.1.0`) for a reproducible install, or drop it to track `main`.
+> Pin a released tag (`@v0.1.1`) for a reproducible install, or drop it to track `main`.
 > On Windows, run inside WSL2.
 
 **Open it** — from any project directory:
@@ -106,7 +106,8 @@ Small requests start immediately; `/gate on` reviews the goal proposal first.
 
 | Version | Status | What it is |
 |---|---|---|
-| **v0.1.0** | Current | Phase 0 — local · single-writer · sequential. `Goal → writer → deterministic verifier → fresh-context reviewer → human confirm`, on a durable SQLite ledger. Opt-in `/resume stash` for the clean-tree guard. |
+| **v0.1.1** | Current | Patch on Phase 0. A Codex tool call is counted once rather than once per lifecycle event, so the activity block no longer reads ~2× high. Docs numbering folded onto a single `v0.1.x` roadmap. |
+| v0.1.0 | Previous | Phase 0 — local · single-writer · sequential. `Goal → writer → deterministic verifier → fresh-context reviewer → human confirm`, on a durable SQLite ledger. Opt-in `/resume stash` for the clean-tree guard. |
 
 v0.1.0 highlights: full-screen first-run trust & setup, keyboard-selectable slash commands and
 proposal actions, PM/Engineer/Reviewer seat labels, persistent history with Tab completion and
