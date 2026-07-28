@@ -1,0 +1,1628 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>pi · Curator · Orca — 三层架构与那个空位</title>
+<style>
+  :root{
+    --bg:#070b16; --ink:#e8eefc; --muted:#93a3c4; --line:#1e2942;
+    --pi:#5aa9f5; --cur:#a78bfa; --orca:#f0a24b;
+    --gap:#f4707a; --core:#43e2a4;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{
+    background:radial-gradient(1200px 700px at 18% -8%, #12203c 0%, var(--bg) 58%);
+    color:var(--ink);
+    font:15px/1.55 ui-sans-serif,-apple-system,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
+    display:flex;flex-direction:column;overflow:hidden;
+  }
+
+  /* ── masthead ─────────────────────────────────────────── */
+  header.top{
+    padding:16px 26px 13px;border-bottom:1px solid var(--line);
+    background:rgba(7,11,22,.78);backdrop-filter:blur(8px);flex:0 0 auto;z-index:9
+  }
+  header.top h1{margin:0;font-size:20px;letter-spacing:.2px;font-weight:650}
+  header.top h1 .sep{color:var(--muted);font-weight:400;margin:0 6px}
+  header.top .thesis{margin:7px 0 0;font-size:14px;color:var(--muted);max-width:1180px}
+  header.top .thesis b{font-weight:600}
+  .up{color:var(--orca)} .down{color:var(--pi)} .mid{color:var(--core)}
+  .legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin-top:10px;font-size:12.5px;color:var(--muted)}
+  .legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+  .legend .k{color:#cfdcf5;font-weight:600;margin-right:3px}
+  .hint{margin-left:auto;opacity:.7}
+
+  /* ── pan viewport ─────────────────────────────────────── */
+  .viewport{flex:1 1 auto;overflow:auto;cursor:grab;scrollbar-color:#2b3a5e transparent}
+  .viewport.dragging{cursor:grabbing;user-select:none}
+  /* 内容区一律可选中复制，光标也不再是抓手 */
+  .tier,.wirekey,.costs,.roadmap,.wirelabel{cursor:auto;user-select:text}
+  .viewport::-webkit-scrollbar{width:11px;height:11px}
+  .viewport::-webkit-scrollbar-thumb{background:#26314f;border-radius:8px}
+  .viewport::-webkit-scrollbar-track{background:transparent}
+
+  .canvas{position:relative;width:max-content;min-width:100%;padding:40px 60px 70px 258px}
+  svg.wires{position:absolute;inset:0;pointer-events:none;overflow:visible;z-index:5}
+  svg.wires path{fill:none;stroke-linejoin:round;stroke-linecap:round}
+  .wirelabel{
+    position:absolute;z-index:6;transform:translate(-100%,-50%);
+    padding:3px 10px;border-radius:999px;font-size:12px;white-space:nowrap;
+    background:#0b1122;border:1px solid currentColor;box-shadow:0 3px 14px rgba(0,0,0,.6)
+  }
+  .wirelabel b{font-weight:700;margin-right:4px}
+
+  /* ── tier shell ───────────────────────────────────────── */
+  .tier{
+    position:relative;z-index:3;border:1px solid var(--tc);border-radius:20px;
+    background:linear-gradient(180deg,var(--tbg),rgba(8,12,24,.5));
+    padding:16px 20px 22px;margin-bottom:130px;width:max-content;min-width:100%;
+  }
+  .tier:last-of-type{margin-bottom:0}
+  .tier.orca{--tc:#63430f;--tc2:#7d5716;--tbg:rgba(42,26,8,.5);--ac:var(--orca)}
+  .tier.cur {--tc:#3d2c73;--tc2:#4c3890;--tbg:rgba(21,14,43,.5);--ac:var(--cur)}
+  .tier.pi  {--tc:#1c3358;--tc2:#25446f;--tbg:rgba(14,26,51,.5);--ac:var(--pi)}
+
+  .tier-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin:0 2px 14px}
+  .tier-head .name{font-size:17px;font-weight:680;letter-spacing:.3px;color:var(--ac)}
+  .tier-head .role{font-size:12.5px;color:var(--muted);max-width:900px}
+
+  /* ── horizontal tree ──────────────────────────────────── */
+  .tree{display:flex;align-items:center}
+
+  .root{
+    flex:0 0 214px;border-radius:14px;padding:14px 14px 15px;
+    border:1px solid var(--ac);background:rgba(255,255,255,.035);
+    box-shadow:inset 0 0 30px rgba(255,255,255,.03)
+  }
+  .root .pos{
+    display:inline-block;font-size:10.5px;letter-spacing:1.6px;text-transform:uppercase;
+    padding:2px 8px;border-radius:5px;border:1px solid var(--ac);color:var(--ac);margin-bottom:8px
+  }
+  .root .rname{display:block;font-size:22px;font-weight:700;color:var(--ac);line-height:1.2}
+  .root .rsub{display:block;font-size:13px;color:#cfdcf5;margin-top:2px}
+  .root p{margin:9px 0 0;font-size:11.5px;line-height:1.5;color:var(--muted)}
+
+  ul.lv{list-style:none;margin:0;padding:0 0 0 34px;position:relative}
+  ul.lv::before{                       /* 父节点 → 主干 */
+    content:"";position:absolute;left:0;top:50%;width:34px;
+    border-top:1px solid var(--tc2)
+  }
+  ul.lv > li{position:relative;padding-left:34px;display:flex;align-items:center}
+  ul.lv > li + li{margin-top:6px}
+  ul.lv > li::before{                  /* 主干 → 子节点 */
+    content:"";position:absolute;left:0;top:50%;width:34px;
+    border-top:1px solid var(--tc2)
+  }
+  ul.lv > li::after{                   /* 竖主干 */
+    content:"";position:absolute;left:0;top:0;bottom:0;border-left:1px solid var(--tc2)
+  }
+  ul.lv > li:first-child::after{top:50%}
+  ul.lv > li:last-child::after{bottom:50%}
+  ul.lv > li:only-child::after{display:none}
+
+  /* 大模块 */
+  .node{
+    flex:0 0 252px;border-radius:11px;padding:9px 11px 10px;
+    border:1px solid var(--nc,var(--tc2));background:rgba(255,255,255,.04);
+    transition:transform .16s ease,box-shadow .16s ease,border-color .16s ease
+  }
+  .node .idx{
+    font-size:10px;font-weight:800;color:#08101f;background:var(--ac);
+    border-radius:5px;padding:1px 5px;letter-spacing:.4px;margin-right:7px
+  }
+  .node .t{font-size:14px;font-weight:640}
+  .node em{display:block;font-style:normal;font-size:11px;color:var(--muted);margin-top:3px}
+
+  li:hover > .node{transform:translateX(3px);box-shadow:0 8px 24px rgba(0,0,0,.5);border-color:var(--ac)}
+  li:hover > ul.lv > li > .leaf{border-color:var(--ac);background:rgba(255,255,255,.055)}
+
+  /* 子模块 */
+  .leaf{
+    flex:0 0 392px;font-size:12.5px;line-height:1.45;color:#cfdcf5;
+    padding:5px 11px;border-radius:8px;
+    border:1px solid rgba(255,255,255,.09);background:rgba(255,255,255,.025);
+    transition:border-color .16s ease,background .16s ease
+  }
+  .leaf code{
+    font:11.5px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;
+    background:rgba(255,255,255,.08);padding:1px 4px;border-radius:4px;color:#eaf2ff
+  }
+  .leaf b{color:#fff}
+
+  /* 变体 */
+  li.gap > .node{--nc:#6e2630;background:rgba(244,112,122,.10);border-style:dashed;
+                 animation:pulseGap 3.2s ease-in-out infinite}
+  li.gap > .node .idx{background:var(--gap)}
+  li.gap > .node .t{color:var(--gap)}
+  @keyframes pulseGap{0%,100%{box-shadow:0 0 0 0 rgba(244,112,122,0)}50%{box-shadow:0 0 0 5px rgba(244,112,122,.10)}}
+
+  li.core > .node{--nc:#1d6b4d;background:rgba(67,226,164,.11);
+                  animation:glowCore 3.6s ease-in-out infinite}
+  li.core > .node .idx{background:var(--core)}
+  li.core > .node .t{color:var(--core)}
+  @keyframes glowCore{0%,100%{box-shadow:0 0 0 0 rgba(67,226,164,0)}50%{box-shadow:0 0 24px 0 rgba(67,226,164,.24)}}
+
+  li.delegated > .node{opacity:.72;border-style:dashed}
+
+  .slot{
+    margin:16px 2px 0;padding:10px 15px;border-radius:11px;font-size:13px;max-width:1050px;
+    border:1px dashed var(--core);color:var(--core);background:rgba(67,226,164,.06)
+  }
+  .slot b{color:#eafff6}
+
+  /* 底部索引 */
+  .wirekey{
+    position:relative;z-index:3;margin-top:44px;padding:16px 20px;border-radius:16px;
+    border:1px solid var(--line);background:rgba(10,15,30,.6);width:max-content;min-width:100%
+  }
+  .wirekey h3{margin:0 0 10px;font-size:14px;font-weight:650;color:#cfdcf5}
+  .wirekey ol{margin:0;padding:0;list-style:none;display:grid;gap:7px}
+  .wirekey li{font-size:13px;color:#cfdcf5;display:flex;gap:9px;align-items:baseline}
+  .wirekey .n{font-weight:800;font-size:12px;padding:1px 7px;border-radius:5px;color:#08101f}
+  .wirekey .d{color:var(--muted)}
+
+  /* 接 pi 的成本 */
+  .costs{
+    position:relative;z-index:3;margin-top:26px;padding:18px 22px;border-radius:16px;
+    border:1px solid var(--line);background:rgba(10,15,30,.6);width:max-content;min-width:100%
+  }
+  .costs h3{margin:0;font-size:15px;font-weight:660;color:#cfdcf5}
+  .costs h3 .sub{font-weight:400;font-size:12.5px;color:var(--muted);margin-left:8px}
+  .costs .grid{display:grid;grid-template-columns:680px 470px;gap:26px;margin-top:15px;align-items:start}
+  .ch{margin:0 0 10px;font-size:11.5px;letter-spacing:1.5px;text-transform:uppercase;font-weight:700}
+  .ch.red{color:var(--gap)} .ch.green{color:var(--core)} .ch.blue{color:var(--pi)}
+  .cost{
+    border:1px solid rgba(255,255,255,.09);border-left:3px solid var(--cc,#555);
+    background:rgba(255,255,255,.025);border-radius:10px;padding:9px 13px;margin-bottom:9px
+  }
+  .cost .hd{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap}
+  .cost .sev{font-size:10px;font-weight:800;letter-spacing:.6px;padding:2px 7px;border-radius:5px;color:#08101f}
+  .cost .hd b{font-size:13.5px}
+  .cost p{margin:6px 0 0;font-size:12.5px;line-height:1.52;color:#cfdcf5}
+  .cost p.now{color:var(--muted)}
+  .cost p.touch{font-size:11.5px;color:var(--muted);margin-top:5px}
+  .cost code{font:11.5px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;
+             background:rgba(255,255,255,.08);padding:1px 4px;border-radius:4px;color:#eaf2ff}
+  ul.plain{list-style:none;margin:0 0 18px;padding:0}
+  ul.plain li{font-size:12.5px;line-height:1.5;color:#cfdcf5;padding-left:15px;position:relative;margin-bottom:6px}
+  ul.plain li::before{content:"";position:absolute;left:0;top:8px;width:5px;height:5px;border-radius:50%;background:var(--bc,#556)}
+  ul.plain code{font:11.5px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;
+                background:rgba(255,255,255,.08);padding:1px 4px;border-radius:4px;color:#eaf2ff}
+  .costs .warn{
+    margin-top:14px;padding:10px 14px;border-radius:11px;border:1px dashed var(--gap);
+    color:#ffdbde;background:rgba(244,112,122,.07);font-size:12.5px;line-height:1.55;max-width:1176px
+  }
+  .costs .warn b{color:#fff}
+  .costs .src{margin-top:12px;font-size:11.5px;color:var(--muted)}
+  .ch.amber{color:var(--orca)}
+
+  /* 岗位 ↔ 相位映射表 */
+  table.mtable{border-collapse:collapse;font-size:12.5px;margin:0 0 8px}
+  table.mtable th,table.mtable td{
+    text-align:left;padding:7px 14px 7px 0;border-bottom:1px solid rgba(255,255,255,.07);white-space:nowrap
+  }
+  table.mtable th{font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);font-weight:700}
+  table.mtable td{color:#cfdcf5}
+  table.mtable tr.isnew td{background:rgba(67,226,164,.07)}
+  table.mtable .job{font-weight:660;color:#fff}
+  table.mtable .pw{color:var(--orca)}
+  table.mtable .new{font-size:10px;font-weight:800;color:#08101f;background:var(--core);
+                    border-radius:5px;padding:1px 6px;margin-left:7px;letter-spacing:.4px}
+  table.mtable code{font:11.5px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;
+                    background:rgba(255,255,255,.08);padding:1px 5px;border-radius:4px;color:#eaf2ff}
+  table.mtable td.dim{color:var(--muted)}
+  .tnote{margin:10px 0 0;font-size:12px;line-height:1.55;color:var(--muted);max-width:1176px}
+  .tnote code{font:11.5px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;
+              background:rgba(255,255,255,.08);padding:1px 4px;border-radius:4px;color:#eaf2ff}
+  .costs .sect{margin-top:22px;padding-top:18px;border-top:1px solid rgba(255,255,255,.08)}
+
+  /* v0.1.x 路线图：阶梯 */
+  .roadmap{
+    position:relative;z-index:3;margin-top:44px;padding:20px 24px 24px;border-radius:18px;
+    border:1px solid #2a3f6b;background:linear-gradient(180deg,rgba(18,32,60,.7),rgba(10,15,30,.6));
+    width:max-content;min-width:100%
+  }
+  .roadmap h2{margin:0;font-size:19px;font-weight:680;color:#dce8ff;letter-spacing:.3px}
+  .roadmap .lede{margin:8px 0 0;font-size:13px;line-height:1.6;color:var(--muted);max-width:1180px}
+  .roadmap .lede b{color:#e8eefc}
+  .ladder{display:flex;align-items:stretch;gap:0;margin-top:20px}
+  .rung{
+    flex:0 0 268px;border-radius:13px;padding:12px 14px 13px;
+    border:1px solid var(--rc);background:var(--rbg)
+  }
+  .rung .p{font-size:11px;letter-spacing:1.6px;text-transform:uppercase;font-weight:800;color:var(--rc2)}
+  .rung .t{display:block;font-size:15px;font-weight:660;margin-top:3px;color:#fff}
+  .rung .d{margin:7px 0 0;font-size:12px;line-height:1.5;color:#cfdcf5}
+  .rung .u{margin:8px 0 0;font-size:11.5px;line-height:1.45;color:var(--muted)}
+  .rung .u b{color:var(--rc2)}
+  .rung-arrow{
+    flex:0 0 42px;display:flex;align-items:center;justify-content:center;
+    color:#4a5f8f;font-size:20px;user-select:none
+  }
+  .r0{--rc:#1d6b4d;--rc2:var(--core);--rbg:rgba(67,226,164,.08)}
+  .r1{--rc:#6b4a13;--rc2:var(--orca);--rbg:rgba(240,162,75,.08)}
+  .r2{--rc:#43318a;--rc2:var(--cur);--rbg:rgba(167,139,250,.08)}
+  .r3{--rc:#23406d;--rc2:var(--pi);--rbg:rgba(90,169,245,.08)}
+  .phase-tag{
+    display:inline-block;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;font-weight:800;
+    padding:2px 9px;border-radius:6px;color:#08101f;margin-right:10px;vertical-align:2px
+  }
+  /* 版本徽章 */
+  .ver{
+    display:inline-block;font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:700;
+    padding:1px 7px;border-radius:5px;margin-left:8px;vertical-align:1px;
+    border:1px solid currentColor;background:rgba(255,255,255,.04)
+  }
+  .ver.v3{color:#43e2a4} .ver.v4{color:#43e2a4} .ver.v5{color:#f0a24b}
+  .ver.v6{color:#5aa9f5} .ver.v7{color:#a78bfa} .ver.v8{color:#f0a24b}
+  .ver.v9{color:#a78bfa} .ver.v10{color:#5aa9f5} .ver.v11{color:#f4707a}
+  .ver.v12{color:#f4707a} .ver.v13{color:#a78bfa} .ver.v14{color:#a78bfa}
+  .ver.v1{color:var(--muted)} .ver.v2{color:var(--muted)}
+
+  /* 逐版交付表 */
+  table.rel{border-collapse:collapse;font-size:12.5px;width:1176px;margin:6px 0 0}
+  table.rel th,table.rel td{
+    text-align:left;padding:8px 12px 8px 0;border-bottom:1px solid rgba(255,255,255,.07);vertical-align:top
+  }
+  table.rel th{font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);font-weight:700}
+  table.rel td{color:#cfdcf5;line-height:1.5}
+  table.rel td.v{white-space:nowrap;font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:700;color:#fff}
+  table.rel td.doc{color:var(--muted);font-size:12px}
+  table.rel td.add{color:var(--core);font-size:12px}
+  table.rel tr.gap td{background:rgba(244,112,122,.07)}
+  table.rel tr.side td{background:rgba(167,139,250,.07)}
+  table.rel tr.final td{background:rgba(67,226,164,.09);font-weight:600}
+  table.rel code{font:11.5px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;
+                 background:rgba(255,255,255,.08);padding:1px 4px;border-radius:4px;color:#eaf2ff}
+
+  /* 编号管线 */
+  ul.pipe{margin:0 0 16px;padding:0;list-style:none;counter-reset:pipe}
+  ul.pipe li{
+    position:relative;padding:0 0 0 32px;margin-bottom:11px;
+    font-size:12.5px;line-height:1.55;color:#cfdcf5
+  }
+  ul.pipe li::before{
+    counter-increment:pipe;content:counter(pipe);position:absolute;left:0;top:0;
+    width:21px;height:21px;border-radius:50%;font-size:11px;font-weight:800;
+    display:flex;align-items:center;justify-content:center;background:var(--cur);color:#08101f
+  }
+  ul.pipe li::after{content:"";position:absolute;left:10px;top:25px;bottom:-11px;border-left:1px dashed #4c3890}
+  ul.pipe li:last-child::after{display:none}
+  ul.pipe b{color:#fff}
+  ul.pipe code{font:11.5px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;
+               background:rgba(255,255,255,.08);padding:1px 4px;border-radius:4px;color:#eaf2ff}
+  ul.pipe li.deny::before{background:var(--gap)}
+  ul.pipe li.gate::before{background:var(--core)}
+  .costs .d, ul.plain li.d, ul.pipe .d{color:var(--muted)}
+
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <h1>pi<span class="sep">·</span>Curator<span class="sep">·</span>Orca<span class="sep">—</span>三层架构与那个空位</h1>
+  <p class="thesis">
+    <b class="down">pi 补你的「下面」</b>——agent 内核可以直接拿来用；
+    <b class="up">Orca 划定你的「上面」</b>——编排壳的形态已被验证，但它把完成判定留空了；
+    <b class="mid">而那个空位，就是 Curator 该占的位置。</b>
+  </p>
+  <div class="legend">
+    <span><i style="background:var(--orca)"></i><span class="k">上层</span>Orca · 进程外编排壳</span>
+    <span><i style="background:var(--cur)"></i><span class="k">中层</span>Curator · 控制平面</span>
+    <span><i style="background:var(--pi)"></i><span class="k">下层</span>pi · 进程内内核</span>
+    <span><i style="background:var(--gap)"></i>留空的地方</span>
+    <span><i style="background:var(--core)"></i>只有 Curator 填上的那块</span>
+    <span class="hint">滚轮或拖拽空白处可上下左右移动 · 文字可直接选中复制</span>
+  </div>
+</header>
+
+<div class="viewport" id="vp">
+  <div class="canvas" id="canvas">
+    <svg class="wires" id="wires">
+      <defs>
+        <marker id="ah-core" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#43e2a4"/></marker>
+        <marker id="ah-orca" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#f0a24b"/></marker>
+        <marker id="ah-gap" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#f4707a"/></marker>
+      </defs>
+    </svg>
+
+    <!-- ══════════════ 上：Orca ══════════════ -->
+    <section class="tier orca">
+      <div class="tier-head">
+        <span class="name">Orca · 进程外编排壳</span>
+        <span class="role">桌面 App。自己不实现 agent loop，把 Claude Code / Codex / OpenCode 当黑盒 CLI 驱动；编排层官方标注 experimental。</span>
+      </div>
+
+      <div class="tree">
+        <div class="root">
+          <span class="pos">上层</span>
+          <span class="rname">Orca</span>
+          <span class="rsub">进程外编排壳</span>
+          <p>桌面应用 · <b>MIT 开源</b> · TypeScript · 31.3k stars<br>「the ADE for working with a fleet of parallel agents」</p>
+        </div>
+
+        <ul class="lv">
+          <li>
+            <div class="node" id="o-ui"><span class="idx">A1</span><span class="t">桌面工作台</span><em>人机界面 / 评审</em></div>
+            <ul class="lv">
+              <li><div class="leaf">Monaco 编辑器 + 文件树 + markdown 预览</div></li>
+              <li><div class="leaf">行级 diff 批注，可批量发回 agent</div></li>
+              <li><div class="leaf">多终端分屏、会话 hibernation、用量追踪</div></li>
+              <li><div class="leaf">移动端、通知、每 worktree 独立浏览器</div></li>
+              <li><div class="leaf">GitHub / Linear / Jira 集成，提交与归属</div></li>
+            </ul>
+          </li>
+
+          <li>
+            <div class="node" id="o-coord"><span class="idx">A2</span><span class="t">Coordinator</span><em>编排层 · experimental</em></div>
+            <ul class="lv">
+              <li><div class="leaf"><code>Task</code> = spec + 依赖 + 状态</div></li>
+              <li><div class="leaf">pending → ready → dispatched → completed / failed / blocked</div></li>
+              <li><div class="leaf">Task DAG：建图后向可用 terminal 派发 ready task</div></li>
+              <li><div class="leaf"><code>DecisionGate</code>：阻塞该 task 直到决策被记录</div></li>
+              <li><div class="leaf">需在 Settings → Experimental 手动开启</div></li>
+            </ul>
+          </li>
+
+          <li>
+            <div class="node" id="o-bus"><span class="idx">A3</span><span class="t">Dispatch &amp; 消息总线</span><em>协调协议</em></div>
+            <ul class="lv">
+              <li><div class="leaf"><code>Dispatch</code> = 把 Task 绑到某个 terminal</div></li>
+              <li><div class="leaf">重试获得<b>全新</b> dispatch context，防迟到消息完成新尝试</div></li>
+              <li><div class="leaf">消息类型：status / worker_done / escalation / decision / heartbeat</div></li>
+              <li><div class="leaf">组寻址：<code>@all</code> · <code>@idle</code> · agent 分组</div></li>
+            </ul>
+          </li>
+
+          <li>
+            <div class="node" id="o-wt"><span class="idx">A4</span><span class="t">Worktree 隔离</span><em>Orca 的地基</em></div>
+            <ul class="lv">
+              <li><div class="leaf">一个 task = 一个物理 <code>git worktree</code></div></li>
+              <li><div class="leaf">各自的 branch / 文件系统 / agent 终端</div></li>
+              <li><div class="leaf">起点可为 base ref、本地分支、commit SHA、远程分支</div></li>
+              <li><div class="leaf">setup hooks：<code>pnpm install</code>、<code>direnv allow</code>、.env 还原</div></li>
+              <li><div class="leaf">同题多 worktree 竞赛 → 人工比 diff 选胜者</div></li>
+            </ul>
+          </li>
+
+          <li class="delegated">
+            <div class="node" id="o-agent"><span class="idx">A5</span><span class="t">Agent 运行时（委托）</span><em>不自建，跑别人的</em></div>
+            <ul class="lv">
+              <li><div class="leaf">Claude Code · Codex · OpenCode</div></li>
+              <li><div class="leaf">以 PTY 终端方式驱动黑盒 CLI</div></li>
+              <li><div class="leaf">沿用各 CLI 自带的权限与工具体系</div></li>
+              <li><div class="leaf">读取 repo 里既有的 <code>.claude/</code>、<code>.codex/</code> hooks</div></li>
+            </ul>
+          </li>
+
+          <li>
+            <div class="node" id="o-mem"><span class="idx">A6</span><span class="t">Provider-owned 记忆</span><em>尊重但不接管</em></div>
+            <ul class="lv">
+              <li><div class="leaf"><code>CLAUDE.md</code> / <code>AGENTS.md</code>：<b>left alone — they belong to the agent</b></div></li>
+              <li><div class="leaf">worktree checkpoint：自由文本进展摘要</div></li>
+              <li><div class="leaf">hook endpoint 落盘并每次重新 source，App 重启后仍可达</div></li>
+              <li><div class="leaf">automation session 提供短期会话连续性</div></li>
+            </ul>
+          </li>
+
+          <li class="gap">
+            <div class="node" id="o-gap"><span class="idx">A7</span><span class="t">留空的地方</span><em>上面这一层没有回答的</em></div>
+            <ul class="lv">
+              <li><div class="leaf"><code>worker_done</code> 只是协调协议里的通知</div></li>
+              <li><div class="leaf">完成权来自 dispatch context，<b>不来自验证</b></div></li>
+              <li><div class="leaf">checkpoint 无来源、无 TTL、可被覆盖</div></li>
+              <li><div class="leaf">worktree 防文件冲突，但不防语义冲突</div></li>
+            </ul>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ══════════════ 中：Curator ══════════════ -->
+    <section class="tier cur">
+      <div class="tier-head">
+        <span class="name">Curator · 控制平面</span>
+        <span class="role">调度权归 Curator 不归模型。上接已被验证的编排形态，下接可替换的内核，中间补上两家都没有的「完成判定」。</span>
+      </div>
+
+      <div class="tree">
+        <div class="root">
+          <span class="pos">中间 · 那个空位</span>
+          <span class="rname">Curator</span>
+          <span class="rsub">控制平面</span>
+          <p>Python · SQLite 账本 · Phase 0 顺序单写入者，V1 迁移到并行</p>
+        </div>
+
+        <ul class="lv">
+          <li>
+            <div class="node" id="c-shell"><span class="idx">B1</span><span class="t">前台 Shell / 工作台</span><em>人机界面</em></div>
+            <ul class="lv">
+              <li><div class="leaf">REPL + slash 命令 + 模式横幅、<code>(mock) &gt;</code> 提示符</div></li>
+              <li><div class="leaf">Textual TUI 工作台（快照式渲染）</div></li>
+              <li><div class="leaf"><code>init</code> 向导 / <code>/init</code> / 首次运行 isatty 引导</div></li>
+              <li><div class="leaf">空状态阶梯、<code>curator reset</code>、<code>/memory</code></div></li>
+            </ul>
+          </li>
+
+          <li>
+            <div class="node" id="c-sched"><span class="idx">B2</span><span class="t">Scheduler</span><em>调度权不交给模型</em></div>
+            <ul class="lv">
+              <li><div class="leaf">停止条件由调度器持有，<b>不由模型自称完成</b></div></li>
+              <li><div class="leaf"><code>pause</code> = 持久游标，不是内存态</div></li>
+              <li><div class="leaf"><code>scheduler/resume.py</code>：可执行的 resume-from-ledger</div></li>
+              <li><div class="leaf"><code>MAX_ITERATIONS</code> + per-step retry，retry 携带失败证据</div></li>
+              <li><div class="leaf">rejected-confirm → pause，而非静默继续</div></li>
+            </ul>
+          </li>
+
+          <li>
+            <div class="node" id="c-loop"><span class="idx">B3</span><span class="t">single_writer_loop</span><em>交付回路</em></div>
+            <ul class="lv">
+              <li><div class="leaf">writer (IMPLEMENT) → verifier (VALIDATE)</div></li>
+              <li><div class="leaf">→ reviewer (REVIEW，fresh context) → human CONFIRM 门</div></li>
+              <li><div class="leaf">编译后的 plan 持久化在 <code>loop_runs.metadata</code></div></li>
+              <li><div class="leaf">角色契约用 YAML overlay 覆盖（<code>writer.default</code> / <code>reviewer.default</code>）</div></li>
+              <li><div class="leaf">异步状态机 <code>_run_steps</code> / <code>_execute_step</code></div></li>
+            </ul>
+          </li>
+
+          <li class="core">
+            <div class="node" id="c-verify"><span class="idx">B4</span><span class="t">harness/verifier</span><em>空位核心之一 · 完成判定</em></div>
+            <ul class="lv">
+              <li><div class="leaf">跑<b>真实命令</b>，不信 provider 自报的 <code>passed</code></div></li>
+              <li><div class="leaf"><code>harness/workspace.py</code> 取 git diff 作为证据</div></li>
+              <li><div class="leaf">验证证据回灌进下一次 retry 的 context</div></li>
+              <li><div class="leaf">进入 DONE 需验证证据 + review 状态 + 必要 gate 全部满足</div></li>
+            </ul>
+          </li>
+
+          <li class="core">
+            <div class="node" id="c-ledger"><span class="idx">B5</span><span class="t">SQLite 证据账本</span><em>空位核心之二 · 可回放</em></div>
+            <ul class="lv">
+              <li><div class="leaf"><code>schema_version</code> + 编号迁移</div></li>
+              <li><div class="leaf">decisions-with-reason：附理由，不只附结果</div></li>
+              <li><div class="leaf">provider 请求 / 响应全量留存 + context 快照</div></li>
+              <li><div class="leaf">memory 写→读闭环（<code>memory/distill.py</code> → <code>context/packaging.py</code>）</div></li>
+              <li><div class="leaf">每条结论都能回溯到 execution / artifact hash</div></li>
+            </ul>
+          </li>
+
+          <li>
+            <div class="node" id="c-prov"><span class="idx">B6</span><span class="t">Provider 驱动层</span><em>下接内核的插槽</em></div>
+            <ul class="lv">
+              <li><div class="leaf">异步 <code>SubprocessDriver</code> / <code>LegacyProviderDriver</code></div></li>
+              <li><div class="leaf">adapter：<code>claude_code.py</code> · <code>codex_cli.py</code></div></li>
+              <li><div class="leaf"><code>registry</code> / <code>detect</code> / <code>curator provider add</code></div></li>
+              <li><div class="leaf"><code>runtime/permissions.py</code>：ActionPolicy 投射为 provider 原生权限配置</div></li>
+            </ul>
+          </li>
+        </ul>
+      </div>
+
+      <div class="slot">
+        <b>这就是那个空位：</b>上面的 Orca 只给出「谁在做什么」，下面的 pi 只给出「模型说完了」——
+        中间没有人回答<b>「这活儿真的干完了吗」</b>。B4 + B5 是全图唯一填上它的两块。
+      </div>
+    </section>
+
+    <!-- ══════════════ 下：pi ══════════════ -->
+    <section class="tier pi">
+      <div class="tier-head">
+        <span class="name">pi · 进程内 agent 内核</span>
+        <span class="role">MIT / TypeScript / 79.4k star 的 monorepo。agent loop、会话持久化、provider 抽象都是它自己的资产，可整块拿来用。</span>
+      </div>
+
+      <div class="tree">
+        <div class="root">
+          <span class="pos">下层</span>
+          <span class="rname">pi</span>
+          <span class="rsub">进程内 agent 内核</span>
+          <p>earendil-works/pi · npm 包：pi-agent-core · pi-ai · pi-tui · pi-coding-agent</p>
+        </div>
+
+        <ul class="lv">
+          <li>
+            <div class="node" id="p-entry"><span class="idx">C1</span><span class="t">入口层 pi-coding-agent</span><em>交互与集成面</em></div>
+            <ul class="lv">
+              <li><div class="leaf">交互 TUI + slash 命令 + 主题 / 键位</div></li>
+              <li><div class="leaf">print 模式：<b>结构化事件流</b></div></li>
+              <li><div class="leaf">RPC：stdin / stdout <b>JSONL</b></div></li>
+              <li><div class="leaf">SDK：在 Node 应用内嵌</div></li>
+              <li><div class="leaf">Skills：按需加载的可复用能力</div></li>
+            </ul>
+          </li>
+
+          <li>
+            <div class="node" id="p-harness"><span class="idx">C2</span><span class="t">AgentHarness</span><em>编排语义层</em></div>
+            <ul class="lv">
+              <li><div class="leaf">phase 机：<code>idle | turn | compaction | branch_summary | retry</code></div></li>
+              <li><div class="leaf"><code>createTurnState()</code> 生成一次 turn 的不可变快照</div></li>
+              <li><div class="leaf">save point：assistant turn 与 tool-result 后落盘并刷新配置</div></li>
+              <li><div class="leaf">结构性操作要求 <code>phase === "idle"</code>，否则报 <code>busy</code></div></li>
+              <li><div class="leaf"><code>abort()</code> 清 steering / follow-up 队列，保留 nextTurn</div></li>
+            </ul>
+          </li>
+
+          <li>
+            <div class="node" id="p-loop"><span class="idx">C3</span><span class="t">agent-loop</span><em>低层执行</em></div>
+            <ul class="lv">
+              <li><div class="leaf">逐 turn 执行与工具调用编排</div></li>
+              <li><div class="leaf"><code>AssistantMessageStream</code> 解耦传输（SSE / ws）与消费</div></li>
+              <li><div class="leaf">compaction 压缩历史，保留 leaf 上下文</div></li>
+              <li><div class="leaf">配置变更影响下一 turn，<b>绝不改写在途请求</b></div></li>
+            </ul>
+          </li>
+
+          <li>
+            <div class="node" id="p-tools"><span class="idx">C4</span><span class="t">Tools + ExecutionEnv</span><em>副作用边界</em></div>
+            <ul class="lv">
+              <li><div class="leaf"><code>createReadTool</code> / <code>WriteTool</code> / <code>EditTool</code> / <code>BashTool</code></div></li>
+              <li><div class="leaf">全部文件与 shell 操作<b>只经注入的</b> <code>ExecutionEnv</code></div></li>
+              <li><div class="leaf"><code>createBashTool()</code> 支持 async <code>prepare</code> 钩子改写命令</div></li>
+              <li><div class="leaf">工具状态存进 result <code>details</code>，以支持分叉重建</div></li>
+            </ul>
+          </li>
+
+          <li>
+            <div class="node" id="p-session"><span class="idx">C5</span><span class="t">Session（append-only 树）</span><em>持久化与恢复</em></div>
+            <ul class="lv">
+              <li><div class="leaf">JSONL 落在 <code>~/.pi/agent/sessions/</code>，按工作目录分组</div></li>
+              <li><div class="leaf">每条 entry 带 id 与 parent，可分叉、可 <code>/tree</code> 导航</div></li>
+              <li><div class="leaf"><code>setLeafId()</code> 追加持久 leaf 记录，<b>不是内存游标</b></div></li>
+              <li><div class="leaf">durable 记录：<code>OperationStarted</code> / <code>ToolCallFinished</code> / <code>QueueEnqueued</code></div></li>
+              <li><div class="leaf"><code>builder().restore()</code> 归约 entry 重建；provider 流不可恢复，只从 durable 边界重试</div></li>
+            </ul>
+          </li>
+
+          <li>
+            <div class="node" id="p-ai"><span class="idx">C6</span><span class="t">pi-ai 模型抽象</span><em>推理边界</em></div>
+            <ul class="lv">
+              <li><div class="leaf">Anthropic / OpenAI / Google 统一接口</div></li>
+              <li><div class="leaf">订阅态复用（Claude Pro / ChatGPT Plus / Copilot）</div></li>
+              <li><div class="leaf">llama.cpp 本地推理</div></li>
+              <li><div class="leaf"><code>getApiKeyAndHeaders()</code> 每请求解析，支持令牌刷新</div></li>
+            </ul>
+          </li>
+
+          <li>
+            <div class="node" id="p-ext"><span class="idx">C7</span><span class="t">Extensions</span><em>可扩展性 · 不走 MCP</em></div>
+            <ul class="lv">
+              <li><div class="leaf"><code>registerTool</code> / <code>registerCommand</code> / <code>registerProvider</code></div></li>
+              <li><div class="leaf">30+ 生命周期事件；<code>tool_call</code> 可拦截阻断，<code>tool_result</code> 可改写</div></li>
+              <li><div class="leaf">project trust——官方定义为「输入加载守卫，<b>不是安全边界</b>」</div></li>
+              <li><div class="leaf">subagent 只是 <code>examples/</code> 里的扩展：子进程扇出，4 并发 / 8 排队</div></li>
+              <li><div class="leaf">全仓库<b>零 MCP</b>：用进程内扩展取代协议</div></li>
+            </ul>
+          </li>
+
+          <li class="gap">
+            <div class="node" id="p-gap"><span class="idx">C8</span><span class="t">留空的地方</span><em>下面这一层没有回答的</em></div>
+            <ul class="lv">
+              <li><div class="leaf">无 verifier：turn 结束即视为完成</div></li>
+              <li><div class="leaf">无 evidence、无完成判定、无交付门</div></li>
+              <li><div class="leaf">无内建沙箱——「部分的进程内沙箱容易被误解为安全边界」</div></li>
+              <li><div class="leaf">subagent 只隔离 context，<b>不隔离文件系统</b></div></li>
+            </ul>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ══════════════ 连线索引 ══════════════ -->
+    <div class="wirekey">
+      <h3>跨层连线 — 三者之间真正可接的接口</h3>
+      <ol>
+        <li><span class="n" style="background:#43e2a4">1</span><span><b>C1 → B6</b>　pi 的 RPC / JSONL 结构化事件流，直接接成 Curator 的 provider —— 比继续硬啃 claude_code / codex_cli 的 PTY 输出便宜得多。<span class="d">这是最短路径。</span></span></li>
+        <li><span class="n" style="background:#43e2a4">2</span><span><b>C5 → B5</b>　pi 的 durable session 树与 Curator 的 SQLite 账本同构（append-only + 持久游标 + 只从 durable 边界重试）。<span class="d">Execution 语义可直接对照，不必重新推导。</span></span></li>
+        <li><span class="n" style="background:#f4707a">3</span><span><b>C8 ↑ B4</b>　pi 留下的空白：turn 结束即完成，没有任何验证。</span></li>
+        <li><span class="n" style="background:#f4707a">4</span><span><b>A7 ↓ B4</b>　Orca 留下的空白：worker_done 只是通知，完成权来自 dispatch context。<span class="d">两条红线汇到同一块绿卡 —— 这就是那个空位。</span></span></li>
+        <li><span class="n" style="background:#f0a24b">5</span><span><b>A4 → B3</b>　worktree = 并行的写入边界。Curator V1.2 的 worktree adapter：独占 lease、base-ref pinning、crash reconciliation。</span></li>
+        <li><span class="n" style="background:#f0a24b">6</span><span><b>A2 → B2</b>　Task / Dispatch / DecisionGate 协议可迁移为持久 DAG + ready queue（V1.1–V1.3），但最终状态由 scheduler 与证据决定，不由消息决定。</span></li>
+      </ol>
+    </div>
+
+    <!-- ══════════════ v0.1.x 路线图 · 总览 ══════════════ -->
+    <div class="roadmap">
+      <h2>v0.1.x → v0.2.0 —— 全部编号收在 v0.1.x 内</h2>
+      <p class="lede">
+        <b>目标定义：</b>在单个 Git 仓库内，基于任务 DAG，把最多 4 个独立写任务分配到隔离的 git worktree；
+        由确定性 scheduler、证据门禁、租约恢复与可追溯任务记忆共同保证<b>可恢复、可审计、可控</b>地并行。
+        <b>不复刻 Orca 的完整 ADE。</b>
+        <br><b>编号规则：</b>关键路径全部收在 <code>v0.1.x</code>；<b><code>v0.2.0</code> 是这条路径全部完成后的正式版</b>。<b>关键路径只到「可靠的并行内核」为止</b> —— Producer 台、<code>/agents</code>、用户自定义角色/流程、双向实时 steer、PTY attach <b>全部移到 <code>v0.2.x</code> / <code>v0.3</code></b>，因为公开版本号是线性的：挂在 <code>v0.1.x</code> 上就是 <code>v0.2.0</code> 的前置标签，「不阻塞」与「全部完成才发布」不能同时成立。<span class="d">（此前的「阶段 0/1/2/3」与设计文档的「V1.1–V1.6」都并入这一套编号。）</span>
+      </p>
+      <div class="ladder">
+        <div class="rung r0">
+          <span class="p">v0.1.1 – v0.1.5</span><span class="t">地基与隔离</span>
+          <p class="d">修 #26 与事实 · 迁移备份 · <b>P0 治理状态隔离</b> · canonical model（三种图分开） · artifact store。</p>
+          <p class="u"><b>解锁 →</b> 结论可追到 hash、状态机拒绝非法跳转</p>
+        </div>
+        <div class="rung-arrow">&#8594;</div>
+        <div class="rung r1">
+          <span class="p">v0.1.6 – v0.1.8</span><span class="t">运行时</span>
+          <p class="d">worktree adapter（仍单 writer） · <b>lease + fencing token</b> · runtime health 与 provider capability manifest。</p>
+          <p class="u"><b>解锁 →</b> 写入边界、崩溃恢复、能力矩阵与告知</p>
+        </div>
+        <div class="rung-arrow">&#8594;</div>
+        <div class="rung r3">
+          <span class="p">v0.1.9 – v0.1.11</span><span class="t">调度与观测</span>
+          <p class="d">DAG + ready queue（并发仍 1） · 最小证据化记忆 · 最小 Control Desk。</p>
+          <p class="u"><b>解锁 →</b> 依赖驱动、可回溯记忆、看得见</p>
+        </div>
+        <div class="rung-arrow">&#8594;</div>
+        <div class="rung r2">
+          <span class="p">v0.1.12 – v0.1.14</span><span class="t">并行</span>
+          <p class="d">只读角色并行 → 两 writer 公测（<b>实际 diff 仲裁</b>） → RC（默认 2 / 最大 4、公平性、降级）。</p>
+          <p class="u"><b>Producer 线已移出</b> → v0.2.x / v0.3</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════ 逐版交付 + 卡片归属 ══════════════ -->
+    <div class="costs">
+      <h3>逐版交付 · 本文档卡片归属 · 新增补强
+        <span class="sub">—— 绿色行是本次核查<b>新补进来</b>的项；紫色行是不阻塞并行内核的第二条线。</span>
+      </h3>
+
+      <table class="rel">
+        <thead><tr><th style="width:80px">版本</th><th style="width:380px">交付 · 本文档对应</th><th style="width:340px">验收（自动化可验证）</th><th>降级 · 明确不做</th></tr></thead>
+        <tbody>
+          <tr class="gap"><td class="v">v0.1.1</td>
+            <td>修 <b>#26</b>（TUI 对 Codex 的 tool-call 计数约 2×）；<b>文档事实与命名修复</b>：三套编号合一、Orca 是 MIT 开源非闭源、pi 的 star 数不当可靠性背书。</td>
+            <td>Codex fixture 中一次逻辑调用只计一次；lifecycle event 另行展示；ledger 语义不变。</td>
+            <td class="add">不做 schema 迁移、DAG、并行。</td></tr>
+
+          <tr class="gap"><td class="v">v0.1.2</td>
+            <td>迁移安全。<b>编号迁移框架已存在</b>（<code>db.py:93</code> <code>VERSIONED_MIGRATIONS</code> + <code>schema_version</code>，已跑两个迁移），缺的只是备份与回滚。</td>
+            <td>任意 <code>v0.1.0</code> 的 <code>.curator</code> 可备份后打开；<b>失败迁移不破坏原账本</b>；dry-run 输出待执行迁移清单。</td>
+            <td class="add"><b>补强：</b>自动备份 · dry-run · 回滚说明（<code>backup</code> 全仓库零命中）。不改旧 session 运行语义。</td></tr>
+
+          <tr class="gap"><td class="v">v0.1.3</td>
+            <td><b>P0 状态隔离</b>：phase guard（忙时拒结构性操作）· 权限<b>默认只读</b> · <b>治理状态隔离</b>。<span class="doc">对应：地基「相位机」、解封「默认拒绝」「治理边界」</span></td>
+            <td><b>未声明写权限的槽位无法写工作区</b>；<b>agent 进程无法读写治理状态</b>（cwd 与 sandbox 双重限制）；契约/模板/策略文件<b>内容哈希</b>前后一致；SQLite 通过<b>事务版本 + 表级逻辑摘要 + <code>integrity_check</code></b>（<b>不比对文件字节</b>，WAL/checkpoint 会改变它）。</td>
+            <td class="add"><b>提为 P0：</b>原计划靠 verifier 检 diff 兜底 —— 已证不可行（<code>.curator/</code> 被 gitignore <b>且</b> 被 <code>_is_curator_state()</code> 滤出 porcelain）。改为 <b>OS/进程层隔离在前</b>，按类型分开的完整性检查在后。<b>不做</b>「SQLite 文件哈希」这种会被 WAL 误报的方案。</td></tr>
+
+          <tr><td class="v">v0.1.4</td>
+            <td>Canonical model：<code>TaskDependency</code> · 不可变 <code>Execution</code>（<code>parent_execution_id</code>）· <code>CoordinationEvent.causation_id</code> · <b>旧模型映射</b>。<span class="doc">对应：地基「不可变尝试」「三种图必须分开」</span></td>
+            <td>有限状态表<b>拒绝非法跳转</b>；重放事件可恢复 task 状态；<code>ProviderRunRecord</code>/<code>LoopIterationRecord</code> 可映射为 <code>Execution</code> 且旧查询仍可用。</td>
+            <td class="add"><b>三种图分开：</b>依赖 / 血缘 / 因果各用各的字段，不共用一个 <code>parent_id</code>。不做并发 dispatch。</td></tr>
+
+          <tr class="gap"><td class="v">v0.1.5</td>
+            <td><code>StepSnapshot</code> · <b>内容寻址 artifact store</b> · 原子落盘 · <code>ReviewFinding</code>。<span class="doc">对应：地基「输入快照」</span></td>
+            <td>每个验证结论可追到 <b>artifact hash</b>；<code>DONE</code> 缺证据必被拒绝；<b>数据库不再存大 transcript / patch</b>。</td>
+            <td class="add"><b>补强：</b>大 payload 移出 SQLite（已核 <code>provider_runs.request_json</code>/<code>response_json</code> 是 text 列）。不做自动合并、远程 PR。</td></tr>
+
+          <tr class="gap"><td class="v">v0.1.6</td>
+            <td>Worktree adapter：create / inspect / archive、base-ref pinning、workspace ownership。<b>仍单 writer。</b><span class="doc">对应：并行「写锁是项目级的」</span></td>
+            <td>一个可写 task 只拥有一个 workspace；崩溃后<b>可识别孤儿 worktree</b>；clean baseline 仍有效。</td>
+            <td class="add"><b>补强：</b>孤儿 worktree 识别与回收。<b>不做</b>同时两个 writer。</td></tr>
+
+          <tr class="gap"><td class="v">v0.1.7</td>
+            <td><b>lease + fencing token</b> · 孤儿回收 · 崩溃恢复 · handoff snapshot。<span class="doc">对应：地基「恢复三段式」</span></td>
+            <td><b>旧 execution 的 fencing token 失效后，即使旧进程仍存活，也无法续租、提交事件或完成 Task</b>；<b>且其产出的 diff / artifact 永不进入候选合并集</b> —— 过期进程仍可能继续改自己的 worktree，所以必须<b>终止或隔离该进程与工作区</b>，仅凭「拒绝写账本」不够；kill/restart 后不遗留 <code>RUNNING</code>；恢复必新建 execution 且保留历史。</td>
+            <td class="add"><b>补强：</b>fencing token（比「迟到 <code>worker_done</code> 被拒绝」更完整）。不做 SSH / 远程 runtime。</td></tr>
+
+          <tr class="gap"><td class="v">v0.1.8</td>
+            <td>两个<b>同名不同物</b>的探测，拆开命名：<br><code>runtime_health_probe</code> —— 进程是否活着、heartbeat<br><code>provider_capability_manifest</code> —— 是否支持 steer / mid-run approval / structured output<span class="doc">对应：解封「★ capability probe」「codex 残血告知」「角色池」「model/effort 收权」</span></td>
+            <td>runtime 失活或 heartbeat 过期时<b>不可新 dispatch</b>；<b>绑定时展示能力矩阵与受影响项</b>；账本记录<b>实际生效</b>的 model 与 effort；凭据不进 prompt / 日志 / memory。</td>
+            <td class="add"><b>补强：</b>命名拆分。<b>双向通道与 agent 级 steer 移出关键路径</b> → v0.2.x；本版只做<b>能力声明与告知</b>，不做交互。</td></tr>
+
+          <tr><td class="v">v0.1.9</td>
+            <td>Scheduler：Goal→Task DAG compiler · ready queue · 依赖释放 · 资源声明。<b>并发上限仍为 1。</b><span class="doc">对应：并行「DAG 物化：边从 <code>handoff_rules</code> 推导」「模型提议系统校验」</span></td>
+            <td>依赖未完成不能 dispatch；共享资源任务被串行化；<b>队列重启后顺序一致</b>；跨角色的边可在契约里找到依据、整图无环。</td>
+            <td class="add">不做并行执行。<b><code>claimed_paths</code> 此处只作调度提示，不作安全判据。</b></td></tr>
+
+          <tr><td class="v">v0.1.10</td>
+            <td><b>最小</b>证据化记忆：<code>TaskMemoryEntry</code> 的 scope / TTL / confidence / supersedes；读 <code>AGENTS.md</code>·<code>CLAUDE.md</code> 记 hash。<span class="doc">对应：地基「compaction 做成被记录的一等步骤」</span></td>
+            <td>每条 <code>validated_fact</code>/<code>decision</code> 可回溯来源；<b>过期或 superseded 的记忆不进默认上下文</b>；agent 自述不能直接升级为长期事实。</td>
+            <td class="add"><b>刻意收窄为「最小」</b>（原计划这一格是完整记忆体系，滑期风险最高）。不静默改写 <code>AGENTS.md</code>。</td></tr>
+
+          <tr><td class="v">v0.1.11</td>
+            <td><b>最小</b> Control Desk：<code>/tasks</code> <code>/queue</code> <code>/workspaces</code> <code>/executions</code> <code>/approvals</code> <code>/memory</code>；只读活动流。<span class="doc">对应：并行「列 goal 不列 agent」「三级下钻」；Producer 线的「活动流」（单向即可，组件已在 <code>shell_app.py:340-386</code>）</span></td>
+            <td>UI 与 ledger 查询结果一致；所有控制操作产生审计事件；<b>渲染不需要任何 provider 调用</b>。</td>
+            <td class="add"><b>刻意收窄为「最小」。</b>不做 Electron IDE、无限分屏、移动端。</td></tr>
+
+          <tr><td class="v">v0.1.12</td>
+            <td><b>只读角色并行</b>：多 Fresh Ears / 多 Composer。<span class="doc">对应：并行「只读角色先并行」</span></td>
+            <td>三个只读角色可并行且账本能表达「同一 step 的三个分支」；<b>不需要 worktree、不动写锁</b>。</td>
+            <td class="add">先验证池分配 + 分支记账链路，再碰写角色。</td></tr>
+
+          <tr class="gap"><td class="v">v0.1.13</td>
+            <td>两 writer 公测：worktree 并行 · <b>实际 diff 仲裁</b> · 组合验证 · 故障降级到 1。<span class="doc">对应：并行「写角色并行的判定」</span></td>
+            <td>两任务可并行；<b>完成时用实际 diff 而非 <code>claimed_paths</code> 仲裁</b>；rebase 到组合工作区并通过<b>组合验证</b>；<b>冲突进 gate，不自动选胜者</b>；任一 worker crash 不损坏另一任务。</td>
+            <td class="add"><b>补强：</b><code>claimed_paths</code> 降级为调度提示（模型会漏报生成物 / lockfile / 迁移 / 重命名 / shell 副作用）。不做四 worker 默认开启。</td></tr>
+
+          <tr class="gap"><td class="v">v0.1.14</td>
+            <td>RC：<b>默认并发 2、最大 4</b> · 调度公平性 · 资源预算 · 饥饿检测 · 压力与故障注入。</td>
+            <td>四个独立任务可稳定运行；<b>无无限 retry、无双重 lease、无迟到事件误完成</b>；<b>一键退回上限 1</b> 生效。</td>
+            <td class="add"><b>补强：</b>公平性 · 预算 · 饥饿检测 · 故障注入 · 降级开关。不做跨仓库 DAG、多人协作服务。</td></tr>
+
+          <tr class="final"><td class="v">v0.2.0</td>
+            <td>并行编排内核正式版：稳定迁移 · 完整验收矩阵 · 真实 Claude Code / Codex smoke · 发布文档与兼容策略。</td>
+            <td>macOS/Linux clean install 通过；<code>v0.1.0</code> 数据可安全迁移；四 worker 有界并行稳定。</td>
+            <td class="add">上表全部完成后才成立。</td></tr>
+
+          <tr class="side"><td class="v">v0.2.x<br>v0.3</td>
+            <td><b>移出关键路径的四块</b>：Producer 台（intake）· <code>/agents</code> 与用户自建角色/流程 · 双向通道与 agent 级实时 steer · <code>/attach</code> PTY 逃生口。<span class="doc">对应：本文档「Producer 台」整块 + 解封里的角色泛化与模板数据化</span></td>
+            <td>—</td>
+            <td class="add"><b>为什么移出：</b>公开版本号是线性的 —— 只要挂在 <code>v0.1.x</code> 上，就是 <code>v0.2.0</code> 的前置标签。<b>「不阻塞关键路径」与「全部完成才发布」不能同时成立。</b>并行内核不需要它们，就该移出。</td></tr>
+        </tbody>
+      </table>
+
+      <div class="sect"></div>
+
+      <div class="grid">
+        <div>
+          <p class="ch green">核查结论 —— 现状以代码为准（2026-07-28 实读）</p>
+          <ul class="plain" style="--bc:#43e2a4">
+            <li><b>测试：</b>51 个文件、363 个 <code>def test_</code>，<code>.venv/bin/pytest</code> 9.1.1 <b>实跑 367 passed / 28.68s，全绿</b>。<span class="d">（原调研因本地未装 pytest 未敢断言，这里已确证。）</span></li>
+            <li><b>#26 存在且准确：</b>OPEN、bug 标签、标题就是 tool-call 计数 ~2× 高。</li>
+            <li><b>但「无开放 PR」不成立：</b>有 <b>5 个开放 PR</b>（全 dependabot：typer / ruff / actions×3）。</li>
+            <li><b><code>stablyai/orca</code> 确实存在且公开</b> —— 我一度怀疑是错引，核过，是真的。</li>
+          </ul>
+
+          <p class="ch amber">实体缺口是「迁移矩阵」，不是「从零重建」</p>
+          <p class="tnote" style="max-width:520px">
+            早先那句「14 个实体只有 3 个」是<b>按目标类名匹配</b>得出的，<b>夸大了重构缺口</b> —— 代码里已有明确的语义前身。
+            正确做法是给每个目标实体标明迁移方式，否则会在旧 ontology 旁边<b>再建一套新 ontology</b>。
+          </p>
+          <table class="mtable" style="margin-bottom:10px">
+            <thead><tr><th>目标实体</th><th>现有前身</th><th>迁移方式</th></tr></thead>
+            <tbody>
+              <tr><td><code>CoordinationEvent</code></td><td class="dim"><code>EventRecord</code></td><td>扩展现表 + 加 <code>causation_id</code></td></tr>
+              <tr><td><code>ArtifactRef</code></td><td class="dim"><code>EvidenceRef</code></td><td>扩展 + 内容寻址 store</td></tr>
+              <tr><td><code>Execution</code></td><td class="dim"><code>ProviderRunRecord</code> · <code>LoopIterationRecord</code></td><td><b>新表 + 双写</b>，旧表转兼容视图</td></tr>
+              <tr><td><code>TaskMemoryEntry</code></td><td class="dim"><code>MemoryEntryRecord</code></td><td>扩展（scope/TTL/confidence/supersedes）</td></tr>
+              <tr><td><code>TaskCheckpoint</code></td><td class="dim"><code>PauseRecord</code> · <code>ResumeEvent</code></td><td>语义已在，补版本化与 supersedes</td></tr>
+              <tr><td><code>Task</code></td><td class="dim"><code>TaskRecord</code>(session.py)</td><td>扩展并提升为一等实体</td></tr>
+              <tr class="isnew"><td><code>TaskDependency</code></td><td class="dim">—</td><td><b>全新</b></td></tr>
+              <tr class="isnew"><td><code>AgentRuntime</code> · <code>CapabilityGrant</code></td><td class="dim">部分：<code>RoleInstanceRecord</code> 有池语义</td><td><b>全新</b>（能力矩阵）</td></tr>
+              <tr class="isnew"><td><code>ReviewFinding</code></td><td class="dim">—</td><td><b>全新</b></td></tr>
+            </tbody>
+          </table>
+          <ul class="plain" style="--bc:#f4707a">
+            <li><b>真正从零的只有三块：</b><code>TaskDependency</code>、能力矩阵、<code>ReviewFinding</code>。</li>
+            <li><b>worktree：</b>只有路径预留（<code>paths.py:25</code> 建目录 · <code>reset.py:27</code> 清它 · <code>preflight.py:62</code> 查工作树干净）—— <b>零 worktree 操作</b>。</li>
+            <li><b><code>lease</code> 与 <code>backup</code>：</b>全仓库<b>零命中</b>。<b>fencing token</b> 同样零命中。</li>
+          </ul>
+        </div>
+
+        <div>
+          <p class="ch blue">两处判断，写在这里免得再摇摆</p>
+          <ul class="plain" style="--bc:#5aa9f5">
+            <li><b>Producer 线整体移出 v0.1.x。</b>此前写「不阻塞关键路径」却又把它编成 <code>v0.1.13/14</code>，是自相矛盾 —— 公开版本号线性递增，挂上去就是前置标签。<b>并行内核不需要 intake、不需要自建角色、不需要实时 steer，那就该移到 <code>v0.2.x</code> / <code>v0.3</code>。</b>设计保留在下方，只是不再排进这条路径。</li>
+            <li><b>刻意收窄两格：</b><code>v0.1.10</code>（记忆）与 <code>v0.1.11</code>（Control Desk）都标了「<b>最小</b>」—— 原计划各占一格却是完整体系，是最可能滑期的两格。</li>
+            <li><b>拆掉一处同名不同物：</b>原「capability probe」被同时用来指<b>存活探测</b>与<b>能力矩阵</b>。已拆为 <code>runtime_health_probe</code> 与 <code>provider_capability_manifest</code>（<code>v0.1.8</code>）。</li>
+            <li><b>三处 P0 提前：</b>治理状态隔离提到 <code>v0.1.3</code>（先于 worktree）；fencing token 与 lease 同格（<code>v0.1.7</code>）；<code>claimed_paths</code> 降级为调度提示、完成时以<b>实际 diff</b> 仲裁（<code>v0.1.13</code>）。</li>
+          </ul>
+
+          <p class="ch amber">全程不可突破的规则</p>
+          <ul class="plain" style="--bc:#f0a24b">
+            <li>Scheduler 是<b>唯一</b>能改变 Task/Execution 最终状态的主体。</li>
+            <li>任何写入必须绑定 <code>task_id + execution_id + workspace_id</code>。</li>
+            <li>不用 transcript、checkpoint 或 agent 的「已完成」声明替代证据。</li>
+            <li>Provider-owned 指令文件默认只读；修改必须走显式 proposal + 用户批准 + before/after hash 入账。</li>
+            <li>冲突无法确定时，<b>宁可 gate / 阻塞，不猜测、不自动合并</b>。</li>
+            <li>SSH、远程 runtime、第三方 agent 扩展、桌面 IDE 与移动端 —— <b>v0.2.0 之后再谈</b>。</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="warn">
+        <b>这条路线保留 Curator 最有辨识度的部分：</b>不是「多 agent 的 UI」，而是让多 agent 的<b>执行、证据、记忆与恢复都由确定性控制面负责</b>。
+        下面四个区块是这些交付的设计细节，每张卡片的标题旁标着它属于哪个版本；<b>标 <code>v0.2.x</code> 的部分设计仍然有效，只是不在 <code>v0.2.0</code> 的关键路径上</b>。
+      </div>
+
+      <p class="src">核查依据：本仓库 2026-07-28 实读代码与实跑测试；GitHub issue / PR / release 经 <code>gh</code> 核对。</p>
+    </div>
+
+    <!-- ══════════════ v0.1.3/4/7/9 · 地基 ══════════════ -->
+    <div class="costs">
+      <h3><span class="phase-tag" style="background:#43e2a4">v0.1.3 · 4 · 5 · 7 · 10</span>地基 —— 把 pi 的实现优化进 Curator
+        <span class="sub">—— 不是把 pi 接成 provider，是把 C2 / C5 的机制搬进 B2 / B3 / B5。设计移植，非代码移植。</span>
+      </h3>
+
+      <div class="grid">
+        <div>
+          <p class="ch red">要改的 —— 六处，按优先级<span class="ver v3">v0.1.3</span><span class="ver v4">v0.1.4</span><span class="ver v5">v0.1.5</span><span class="ver v7">v0.1.7</span><span class="ver v10">v0.1.10</span></p>
+
+          <article class="cost" style="--cc:#43e2a4">
+            <div class="hd"><span class="sev" style="background:#43e2a4">1 · 不可变尝试</span><b>retry 从内存计数器变成留痕的尝试</b></div>
+            <p class="now"><b>现状：</b><code>engine.py:167-168</code> 的 <code>retry_counts: dict[str,int]</code> 与 <code>retry_task_ids: set[str]</code> 是<b>内存态</b>，retry 直接重跑同一个 compiled step；<code>LoopIterationRecord</code> 只有 <code>sequence: int</code>，既无 <code>attempt</code> 也无父指针。失败的那次尝试没有独立身份。</p>
+            <p><b>pi 的做法：</b><code>setLeafId()</code> 不是内存游标更新，而是<b>追加一条持久 entry</b>；durable log 里 <code>OperationStartedEntry</code> / <code>ToolCallFinishedEntry</code> 逐条记录操作生命周期。</p>
+            <p><b>改成：</b>每次 retry 新建一条带 <code>attempt</code> 的不可变记录，旧尝试只读保留，所有证据挂到具体 attempt 上。</p>
+            <p class="touch">触点：<code>core/models/loops.py</code> · 一次 schema 迁移 · <code>scheduler/engine.py</code>　｜　这条就是 V1 蓝图里的 <code>Execution</code>，pi 已经把它的持久化形态跑通了，可直接对照。</p>
+          </article>
+
+          <article class="cost" style="--cc:#43e2a4">
+            <div class="hd"><span class="sev" style="background:#43e2a4">2 · 输入快照</span><b>固化「这一步到底喂进去了什么」</b></div>
+            <p class="now"><b>现状：</b><code>ProviderRunRecord</code> 存了 <code>request</code> / <code>response</code> 和 <code>provider_profile_id</code> —— 但那是<b>渲染之后</b>的结果。产生它的输入（role contract 版本、ActionPolicy、被注入的哪几条 memory）没有可寻址的身份，重放时说不清「当时依据的是哪一版」。</p>
+            <p><b>pi 的做法：</b><code>createTurnState()</code> 为一次 turn 生成<b>不可变快照</b>；配置 setter 立即生效于「下一次快照」，<b>绝不改写在途请求</b>；只有到 save point 才刷新上下文、模型、工具与系统提示。</p>
+            <p><b>改成：</b>每步落一份 <code>StepSnapshot</code>：契约版本 + 策略 + profile + 注入的 memory 条目 id 列表。</p>
+            <p class="touch">触点：<code>context/packaging.py</code> · <code>state/</code>　｜　这跟 B5 那句「每条结论都能回溯」是同一件事 —— 现在它是个洞。</p>
+          </article>
+
+          <article class="cost" style="--cc:#5aa9f5">
+            <div class="hd"><span class="sev" style="background:#5aa9f5">3 · 相位机</span><b>显式 phase + 忙时拒绝结构性操作</b></div>
+            <p class="now"><b>现状：</b>全仓库只有 <code>cancellation.py:31</code> 的 <code>is_running()</code>，服务于取消，不是相位。引擎在跑循环时，用户换 provider profile、改 role contract、<code>curator reset</code>、起新 goal，没有任何守卫拦。</p>
+            <p><b>pi 的做法：</b><code>phase: idle | turn | compaction | branch_summary | retry</code>；结构性操作要求 <code>phase === "idle"</code>，否则直接以错误码 <code>busy</code> 拒绝。</p>
+            <p><b>改成：</b>engine 暴露显式 phase，REPL 与 CLI 的结构性入口统一走守卫，拒绝时给出明确原因而不是靠「应该没人这么干」。</p>
+            <p class="touch">触点：<code>scheduler/engine.py</code> · <code>shell/repl.py</code>　｜　改动小、收益立竿见影，适合先做。</p>
+          </article>
+
+          <article class="cost" style="--cc:#f0a24b">
+            <div class="hd"><span class="sev" style="background:#f0a24b">4 · 压缩</span><b>compaction 做成被账本记录的一等步骤</b></div>
+            <p class="now"><b>现状：</b><code>context/</code> 与 <code>scheduler/</code> 里<b>完全没有</b>压缩、截断或 token 预算（grep 零命中）。长循环撑爆上下文是时间问题，不是可能性问题。</p>
+            <p><b>pi 的做法：</b>compaction 是一个一等 phase；<code>Session.buildContextEntries()</code> 返回 compaction-aware 的条目序列，压缩不是隐式截断。</p>
+            <p><b>改成：</b>加一个显式压缩步骤并入账：谁压的、压掉了哪些 entry、依据什么。压缩本身也要有证据。</p>
+            <p class="touch">触点：<code>context/packaging.py</code> · 新的 step 类型</p>
+          </article>
+
+          <article class="cost" style="--cc:#a78bfa">
+            <div class="hd"><span class="sev" style="background:#a78bfa">5 · 恢复契约</span><b>resume 的三段式调和</b></div>
+            <p class="now"><b>现状：</b><code>scheduler/resume.py</code> 已能从账本恢复 —— 这一步你走在前面。缺的是恢复时对「未完成操作」的显式处置。</p>
+            <p><b>pi 的做法：</b>归约 entry 序列重建状态 → 校验运行时依赖是否齐全（<code>restore({missingActiveTools:"fail"})</code>）→ 调和未完成操作：要么从 durable 边界重试，<b>要么显式标记 interrupted</b>。并诚实声明「provider 流不可恢复」。</p>
+            <p><b>改成：</b>把这三段写成契约，不允许任何操作在恢复后悬着。</p>
+            <p class="touch">触点：<code>scheduler/resume.py</code></p>
+          </article>
+
+          <article class="cost" style="--cc:#f4707a">
+            <div class="hd"><span class="sev" style="background:#f4707a">6 · 拓扑</span><b>三种「图」必须分开，不能用一个 <code>parent_id</code> 表达</b></div>
+            <p class="now"><b>现状：</b><code>LoopIterationRecord</code> 用 <code>sequence: int</code> 线性排列，没有任何父指针。分支、重试链、同题竞赛都无处安放。</p>
+            <p><b>但「加个 <code>parent_id</code>」是不够的 —— 那会把三件事糊在一起：</b></p>
+            <p><b>①</b> <code>TaskDependency</code> DAG —— <b>哪些业务任务依赖哪些任务</b>。ready queue 与调度看这个。</p>
+            <p><b>②</b> <code>Execution.parent_execution_id</code> —— <b>retry、竞赛候选、派发尝试的血缘</b>。恢复与「哪次尝试产出了这个证据」看这个。</p>
+            <p><b>③</b> <code>CoordinationEvent.causation_id</code> —— <b>哪个事件导致了当前事件</b>。回放看这个。</p>
+            <p class="touch"><b>混用一个字段的代价：</b>ready queue、恢复与回放三处会同时出现歧义 —— 「这条 parent 是依赖、是重试、还是因果？」<b>并行的数据地基是 ①+②，不是「iteration 加 parent」。</b>pi 的会话树只对应 ②（分叉与 <code>/tree</code>），别把它当成 DAG 的答案。</p>
+          </article>
+        </div>
+
+        <div>
+          <p class="ch green">为什么值得抄</p>
+          <ul class="plain" style="--bc:#43e2a4">
+            <li>这是<b>被广泛采用的开源实现</b>（MIT，79.4k stars），可当作<b>经过大量真实使用反馈的设计参考</b>。<span class="d">注意：star 数不能证明生产可靠性——这里借的是它的设计取舍，不是它的稳定性背书。</span></li>
+            <li>你的 V1 蓝图（Execution 不可变、可回放链、Task DAG）与 pi 的 durable harness 是<b>同一个问题的两种解法</b> —— 可直接对照，不必重新推导。</li>
+            <li>全部是<b>设计移植</b>不是代码移植：pi 是 TypeScript，Curator 是 Python，搬的是语义与不变量，没有依赖、没有语言边界成本。</li>
+            <li>第 1 + 6 条合并做完，Curator 就具备了承载并行的持久化形态；剩下的才是 worktree 与调度。</li>
+          </ul>
+
+          <p class="ch red">不该抄的</p>
+          <ul class="plain" style="--bc:#f4707a">
+            <li><b>扩展系统本身</b> —— Curator 没有第三方插件需求，一个只有一种实现的扩展面就是纯负债。</li>
+            <li><b>零 MCP 的选择</b> —— 那是 pi 在「进程内扩展 vs 跨进程协议」上的取舍，不是普适结论。</li>
+            <li><b>无权限 / 无沙箱</b> —— pi 明确把隔离推给 OS 与容器；Curator 要 ActionPolicy 与 provider 原生权限投射，方向相反。</li>
+            <li><b>pi-tui 差分渲染</b> —— Textual 已经够用。</li>
+            <li><b>「每请求解析凭证」不适用</b> —— <code>setup.py:107</code> 用 <code>credential_ref="local-cli"</code>，靠 CLI 自带登录态，Curator 根本不持有 key，没有令牌过期问题。</li>
+          </ul>
+
+          <p class="ch blue">建议顺序</p>
+          <ul class="plain" style="--bc:#5aa9f5">
+            <li><b>3</b> 相位守卫（小、独立、立刻见效）</li>
+            <li><b>1 + 6</b> 一次迁移拿下 attempt 与 parent</li>
+            <li><b>2</b> StepSnapshot 补上证据链的洞</li>
+            <li><b>5</b> 恢复契约收口</li>
+            <li><b>4</b> 压缩（在上下文真的开始爆之前）</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="warn">
+        <b>一句话分清：</b>接 pi 当 provider 是<b>横向</b>换一个执行者 —— 要改 driver 协议、要在 TypeScript 侧自建权限门、要多一个 Node 依赖。
+        把 pi 的实现吃进 Curator 是<b>纵向</b>补自己的持久化与状态机 —— 零依赖、零语言边界，而且改完之后你换<b>任何</b> provider 都受益。
+        两件事互不依赖，这一版讲的是后者。
+      </div>
+
+      <p class="src">依据：pi 官方文档 <code>packages/agent/docs/agent-harness.md</code> · <code>durable-harness.md</code> · <code>packages/coding-agent/docs/sessions.md</code>；Curator 现状为本仓库 2026-07-26 实读代码。pi 侧行为未实跑验证。</p>
+    </div>
+
+    <!-- ══════════════ v0.1.3/5/6/8 · 解封 ══════════════ -->
+    <div class="costs">
+      <h3><span class="phase-tag" style="background:#f0a24b">v0.1.3 · 8　＋　v0.2.x</span>解封 —— 把写死的映射表打开
+        <span class="sub">—— 目标是「用户自建角色 + 自定义顺序流程」。数据模型全都对，卡住的是七处把开放数据关回代码的地方；其中三处是<b>删代码</b>。</span>
+      </h3>
+
+      <div class="grid">
+        <div>
+          <p class="ch green">★ 前置 —— 一次改动解锁五个功能<span class="ver v8">v0.1.8 仅能力声明</span><span class="ver v13">v0.2.x 才做交互</span></p>
+
+          <article class="cost" style="--cc:#43e2a4">
+            <div class="hd"><span class="sev" style="background:#43e2a4">★ 双向通道</span><b>driver 升级为常驻双向通道 —— 但两家 provider 不对称</b></div>
+            <p class="now"><b>现状：</b><code>SubprocessDriver</code> 是「prompt 写进 stdin → 单向读事件流直到进程结束」。<code>claude_code.py:41</code> 只用了 <code>-p --output-format stream-json</code>，输入方向是关的。</p>
+            <p><b>Claude Code 支持：</b><code>--input-format stream-json</code>；<code>--permission-mode manual</code> 的 help 明确写了它<b>只在 input-format 与 output-format 都是 stream-json 时生效</b>。</p>
+            <p><b>Codex 不支持：</b><code>codex exec --help</code> 第一行就是 <b>“Run Codex non-interactively”</b>，stdin 只当一次性 prompt（管道输入作为 <code>&lt;stdin&gt;</code> 块附加）。<code>permissions.py:48</code> 里你自己的注释早写了这点。要在 codex 上拿双向，只能走顶层 <b>experimental</b> 的 <code>app-server</code> / <code>remote-control</code>，那是另一件事。</p>
+            <p class="touch"><b>所以 driver 需要 capability probe + 优雅降级：</b>每个 driver 声明自己支持哪些能力，UI 按能力显示或隐藏 —— 不能假设所有座位都能被 steer、被打断、被追问。<b>而且降级必须在绑定那一刻告诉用户</b>（见下一张卡）。</p>
+          </article>
+
+          <p class="ch amber">重新算账 —— 哪些真需要这个前置</p>
+          <table class="mtable">
+            <thead><tr><th>能力</th><th>需要双向？</th><th>Claude Code</th><th>Codex</th></tr></thead>
+            <tbody>
+              <tr><td>只读活动流（v0.1.11）</td><td class="dim">否</td><td>✅</td><td>✅</td></tr>
+              <tr class="isnew"><td><b>goal 级 steer</b></td><td class="dim"><b>否</b></td><td>✅</td><td>✅</td></tr>
+              <tr><td>mid-run 权限门</td><td>是</td><td>✅</td><td class="dim">❌ 只有 sandbox 事前声明</td></tr>
+              <tr><td>peek 面板可回复</td><td>是</td><td>✅</td><td class="dim">❌</td></tr>
+              <tr><td>可输入的独立窗口</td><td>是</td><td>✅</td><td class="dim">❌（只读窗口两家都行）</td></tr>
+              <tr><td><b>agent 级</b> steer</td><td>是</td><td>✅</td><td class="dim">❌</td></tr>
+            </tbody>
+          </table>
+          <p class="tnote">
+            <b>好消息藏在前两行：</b>只读活动流与 <b>goal 级 steer 都不需要这个前置</b> —— goal 级 steer 是「下一步打包 context 时带上」，本来就不必打断正在跑的进程。
+            <b>所以最有价值的那部分可以先落地，两家 provider 都吃得到。</b>双向通道解锁的是余下四条，且<b>目前只在 Claude Code 座位上成立</b>。
+          </p>
+
+          <article class="cost" style="--cc:#f0a24b">
+            <div class="hd"><span class="sev" style="background:#f0a24b">★b · 残血连接</span><b>codex 保留，但绑定那一刻必须告知</b></div>
+            <p class="now"><b>决定：</b>codex 座位继续支持，<b>先做只读</b>（活动流、事件、证据全都有），只是<b>不能被中途介入</b>。不藏、不静默降级 —— <b>绑定时把清单摆给用户看</b>。</p>
+            <p><b>codex 实际有的（已核过代码）：</b>只读活动流（<code>codex_cli.py:66-77</code> 已把 <code>command_execution</code>/<code>file_change</code>/<code>patch</code> 解析成 TOOL_CALL，<code>_codex_change_paths</code> 直接给出<b>改了哪些路径</b>，且已过 <code>redact_secrets</code>）· goal 级 steer · 结构化输出 <code>--output-schema</code> · 事前 sandbox 声明 · model + reasoning effort · <code>--ignore-user-config</code> 可复现 · usage/配额识别。</p>
+            <p><b>codex 缺的，全是同一类：「运行中介入」</b> —— mid-run 权限门 · agent 级 steer · 可输入窗口 · peek 回复。</p>
+            <p class="touch"><b>一句话告知：</b>「codex 座位<b>看得见、可事前定条件、可 goal 级追加，但不能被打断</b>。」<span class="d">顺带：<code>_codex_change_paths</code> 还能直接用来核对 <code>claimed_paths</code>，不必只靠 git diff。</span></p>
+          </article>
+
+          <p class="ch amber">告知要按席位说，不是一条通用横幅</p>
+          <ul class="plain" style="--bc:#f0a24b">
+            <li><b>Producer 席位 + codex ＝ 影响最大</b>，它就是对话席位，失去中途介入等于失去一半意义 → 绑定时<b>强提示</b>（不阻止，但要显眼）。</li>
+            <li><b>Fresh Ears / Composer + codex ＝ 几乎无影响</b>，只读评审与出 plan 本来就不需要打断。</li>
+            <li><b>Arranger + codex ＝ 基本无影响</b>，写代码途中很少 steer，真要补充信息走 goal 级即可。</li>
+            <li><b>三个位置都要标：</b>① 绑定/setup 时展示能力矩阵与受影响项 ② <code>/roles</code> 每行标注降级项 ③ 运行时 UI <b>按 capability 显隐</b>——codex 座位不出现 steer 输入框，或出现但标明「只能 goal 级」。</li>
+          </ul>
+
+          <p class="ch blue">API 通道：v0.2.0 之后，而且走 pi</p>
+          <ul class="plain" style="--bc:#5aa9f5">
+            <li><b>不做直连 API driver。</b>裸 API 上那六条确实全都天然成立（循环是你的，执行工具的是你的代码，权限门本来就在手里），<b>但代价是你要自己造内核</b>：可靠的 Edit 工具、沙箱、上下文压缩、订阅态复用全部归零。</li>
+            <li><b>「用裸 API」与「接 pi」是同一个决定的两种形态</b> —— 都是把内核收回自己手里，区别只是 <b>pi 已经写好了</b>。而且 <code>pi-ai</code> 本身就是 Anthropic / OpenAI / Google / llama.cpp 的统一抽象，<b>接 pi 一步就同时拿到 API 通道</b>。</li>
+            <li><b>所以路线是：现在完善底座 → v0.2.0 之后接 pi → API 能力随之而来。</b>期间不引入密钥持有的风险（<code>setup.py:107</code> 现在是 <code>credential_ref="local-cli"</code>，Curator 不碰 key）。</li>
+          </ul>
+
+          <p class="ch red">安全边界 —— P0，先于 worktree<span class="ver v3">v0.1.3</span></p>
+
+          <article class="cost" style="--cc:#f4707a">
+            <div class="hd"><span class="sev" style="background:#f4707a">1 · 默认拒绝</span><b>权限从槽位名搬回契约声明</b></div>
+            <p class="now"><b>现状：</b><code>permissions.py:26</code> 的 <code>_is_reviewer(slot)</code> 硬编码 <code>{reviewer, maindeck}</code>。<b>任何不在集合里的槽位落进 else 分支</b>，拿到 <code>--permission-mode acceptEdits</code> + <code>Edit,Write,Bash(...)</code>。</p>
+            <p><b>后果：</b>用户自建角色的槽位名是用户起的，必然不在集合里 —— <b>自建角色默认拿到工作区写权限</b>。这是 default-open。</p>
+            <p><b>而且声明与执行是脱节的：</b><code>RoleContract.forbidden_actions</code> 今天只被 <code>team/roles.py:120</code> 渲染成 HTML 给人看，<b>没有任何运行时强制</b>。</p>
+            <p class="touch"><b>改成：</b>权限从契约读（<code>forbidden_actions</code> 或显式 <code>writes_workspace: bool</code>），<b>未声明 = 只读</b>。</p>
+          </article>
+
+          <article class="cost" style="--cc:#f4707a">
+            <div class="hd"><span class="sev" style="background:#f4707a">2 · 治理边界 · P0</span><b><code>.curator/</code> 不可被任何 agent 写 —— 且 git diff <span style="color:var(--gap)">看不见它</span></b></div>
+            <p class="now"><b>现状：</b><code>curator_dir = root / ".curator"</code> —— 角色契约、loop 模板、SQLite 账本<b>全在项目目录内</b>。<code>ActionPolicy.for_project()</code> 给 <code>writable_roots=[root]</code>，无排除；<code>_CLAUDE_DISALLOWED</code> 只挡 <code>git push</code> 与 <code>WebFetch</code>，无路径限制。<b>所以今天 Arranger 能改 <code>.curator/team/roles/*.yaml</code>，也能碰 <code>curator.sqlite</code></b>。</p>
+            <p class="now"><b>更严重的是：diff 兜底在结构上不可能生效。</b><code>.curator/</code> 对 git <b>双重不可见</b> ——
+              ① <code>.gitignore:24</code> 有 <code>.curator/</code>，<code>curator init</code> 还会主动写 <code>.curator/.gitignore</code>（<code>wizard.py</code> 注释：<i>“so a project never tracks local Curator state”</i>）；
+              ② <code>workspace.py</code> 的 <code>_is_curator_state()</code> <b>把 <code>.curator</code> 及其子路径从 porcelain 状态里显式滤掉</b>。
+              <b>agent 改了治理状态，git diff 里根本不会出现。</b></p>
+            <p><b>所以正确的顺序是 OS/进程层在前，检查在后：</b>
+              <br>① <b>把控制面状态移出 writer workspace</b>，或以真正只读的方式暴露
+              <br>② <b>provider 的 cwd 只指向 worktree</b>，不指向 project root
+              <br>③ <b>sandbox / OS 层拒绝访问治理状态</b>（codex 的 <code>--sandbox</code>、Claude 的 <code>--add-dir</code> 范围）
+              <br>④ <b>lease 带 fencing token</b> —— 旧进程即使未及时退出，也不能续租、提交事件或完成 Task，<b>其 worktree 产出也不得进入候选合并集</b>（进程与工作区一并终止或隔离）
+              <br>⑤ 检查<b>只作第二道防线</b>，而且<b>不能用 git diff</b>（它们在 git 视野之外）。但<b>也不能一律用文件哈希</b> —— SQLite 的 WAL 与 checkpoint 属正常行为，会在逻辑数据未被非法修改时改变文件字节。<b>必须按类型分开：</b><br>　　· <b>契约 / 模板 / 策略文件</b> → 内容哈希<br>　　· <b>SQLite</b> → 授权写入审计 + 事务版本 + <b>表级逻辑摘要</b> + <code>PRAGMA integrity_check</code>（<b>不用文件字节哈希</b>）<br>　　· <b>禁止访问本身</b> → 由目录隔离与 OS sandbox 保证，不由检查保证</p>
+            <p class="touch">另注：<code>readable_roots</code> / <code>writable_roots</code> <b>根本没被投射进 CLI flag</b>，投射的只有 <code>project_root</code>。<b>这一项是进入 worktree 并行之前的 P0，不是 worktree 那一格的附带项。</b></p>
+          </article>
+
+          <article class="cost" style="--cc:#f0a24b">
+            <div class="hd"><span class="sev" style="background:#f0a24b">3 · 角色池</span><b><code>SLOT_ROLE_INSTANCES</code> 改成池查询</b></div>
+            <p class="now"><b>现状：</b>硬编码 <code>dict[str,str]</code>，slot → 唯一的 <code>xxx.default</code> 实例。用户自建角色不会有这样的条目。</p>
+            <p><b>分配器其实已经写好了：</b><code>runtime/queue.py:tick_work_queue</code> 会查空闲实例、建 assignment、标 BUSY —— 但 <b><code>engine.py</code> 里 <code>work_item</code>/<code>assignment</code>/<code>role_instance</code> 零命中</b>，唯一生产调用点是 <code>repl.py:677</code> 的一条 shell 命令。房子盖好没通电。</p>
+            <p class="touch">顺手补上 capability 匹配：今天是 <code>idle_roles[0]</code> 取第一个，<code>RoleInstanceRecord.capabilities</code> 存了但分配时不看。</p>
+          </article>
+
+          <article class="cost" style="--cc:#f0a24b">
+            <div class="hd"><span class="sev" style="background:#f0a24b">4 · 契约加载</span><b>从枚举遍历改成目录遍历</b></div>
+            <p class="now"><b>现状：</b><code>load_role_contracts</code> 与 <code>validate_role_contracts</code> 都是 <code>for role in RoleName</code> —— 用户放进 <code>.curator/team/roles/</code> 的第四个契约<b>永远不会被读到</b>。</p>
+            <p><b>还有个坑：</b><code>_merge_contract_overlay</code> 是「内置契约 + 用户覆盖」的合并模型。<b>新角色没有默认可合并</b>，overlay 路径要加一个「完整契约」模式。</p>
+            <p class="touch"><code>role_id</code> 会变成目录名（<code>roles_dir/&lt;id&gt;/role.md</code>），必须校验是合法 slug。</p>
+          </article>
+        </div>
+
+        <div>
+          <p class="ch amber">开放数据 —— 三处是删代码<span class="ver v13">v0.2.x</span></p>
+
+          <article class="cost" style="--cc:#43e2a4">
+            <div class="hd"><span class="sev" style="background:#43e2a4">5 · 删代码</span><b><code>LoopTemplate</code> 补字段，删两个模块级 dict</b></div>
+            <p class="now"><b>现状：</b><code>LoopTemplate</code> 本身<b>已经是完整的数据模型</b>（id / name / steps / done_criteria / guide_refs / sensor_refs / allowed_decisions / stop_conditions）。但 step→role 和 step→证据门槛被放在模块级 dict 里按 template.id 查：</p>
+            <p><code>role_for_step()</code> → <code>_TEMPLATE_STEP_ROLES.get(template.id)</code> → 未知模板直接 <code>raise ValueError("Unknown loop template")</code>。用户模板死在这一行。</p>
+            <p class="touch"><b>改成：</b>给 <code>LoopTemplate</code> 补 <code>step_roles: dict[LoopStepType, str]</code>（值是 <b>role_id</b> 不是 RoleName）与 <code>step_required_evidence</code>，然后<b>把 <code>_TEMPLATE_STEP_ROLES</code> / <code>_TEMPLATE_REQUIRED_EVIDENCE</code> 整个删掉</b>。数据回到它本来该在的地方。</p>
+          </article>
+
+          <article class="cost" style="--cc:#43e2a4">
+            <div class="hd"><span class="sev" style="background:#43e2a4">6 · 表达力</span><b><code>steps</code> 从裸枚举列表改成结构</b></div>
+            <p class="now"><b>现状：</b><code>steps: list[LoopStepType]</code> —— 一串裸枚举，<b>同类步骤无法出现两次</b>。「两个不同角色各做一次 REVIEW」今天表达不出来。</p>
+            <p class="touch"><b>改成：</b><code>steps: list[TemplateStep]</code>，每步是 <code>{id, step_type, role_id, required_evidence, max_retries}</code>。</p>
+          </article>
+
+          <article class="cost" style="--cc:#a78bfa">
+            <div class="hd"><span class="sev" style="background:#a78bfa">7 · 去权</span><b><code>RoleName</code> 退化成纯标签，约束改落在流程上</b></div>
+            <p class="now"><b>双身份其实已经并存：</b><code>CompiledLoopStep</code> 同时带 <code>role_id: str</code>（routing 实际消费的）和 <code>role: RoleName</code>（账本粗分类）。<code>resolve_handoff</code> 查的是 <code>role_contracts.get(step.role_id)</code>。<b>开放层已经在了。</b></p>
+            <p><b>不给用户角色贴分类。</b>早先设想的「用户角色必须归入 pm/engineer/qa/producer 某一类」是多余的约束 —— 用户造的 <code>security-auditor</code> 想标什么标什么，甚至不标，<b>校验完全不看它</b>。<code>RoleName</code> 从此只是账本上的分组标签，没有语义权力。</p>
+            <p><b>那约束落在哪？落在流程的步骤构成上。</b>而 <code>StepExecutorType</code> 已经有 <code>PROVIDER</code> / <code>VERIFIER</code> / <code>HUMAN_GATE</code> 三种 —— 所以强制项里<b>大部分不需要新概念</b>（见下方完备性校验）。</p>
+            <p><b><code>LoopStepType</code> 仍降级为执行器类别：</b>它不是标签 —— <code>StepExecutorType</code> 靠它决定怎么执行。五个成员实际是三类：PLAN/IMPLEMENT/REVIEW→<b>PROVIDER</b>，VALIDATE→<b>VERIFIER</b>，CONFIRM→<b>HUMAN_GATE</b>。别动枚举，动的是模板里 step 的表达方式。</p>
+            <p class="touch"><b>不删 <code>RoleName</code>：</b>192 处引用 + 12 个 SQLite 列 + 磁盘目录名，v0.1.0 已发布，迁移不值 —— 但它从「分类学」降为「标签」是零成本的语义变更。</p>
+          </article>
+
+          <article class="cost" style="--cc:#f4707a">
+            <div class="hd"><span class="sev" style="background:#f4707a">8 · 运行条件收权</span><b>model 与 effort 今天完全没有被控制</b></div>
+            <p class="now"><b>现状：</b><code>claude_code.py:41</code> 与 <code>codex_cli.py:41</code> 的 argv 里<b>都没有 <code>--model</code></b>；全仓库 grep <code>--model|reasoning_effort|thinking|effort</code> <b>零命中</b>；<code>ProviderProfileRecord</code> 也没有 model 字段。</p>
+            <p><b>后果一：</b>每个角色跑在各 CLI 的默认模型上，而那个默认是 Curator 之外的全局设置（<code>~/.claude/settings.json</code>、<code>~/.codex/config.toml</code>），<b>会在你不知情时改变</b>。</p>
+            <p><b>后果二（更严重）：</b><code>ProviderRunRecord</code> 存了 request / response / profile_id，却<b>说不清那是哪个模型、哪个思考档产出的</b> —— 「每条结论都能回溯」是打折的：能回到那次调用，<b>但重放不出同样的条件</b>。对一个以证据与可回放为卖点的系统，这是硬伤。</p>
+            <p><b>三级解析链，末端是显式失败：</b>单次运行覆盖 → 角色级设置 → profile 默认 → <b>编译期报错，绝不静默回落到 CLI 默认</b>。这是「调度权在 Curator 不在模型」的自然延伸：<b>运行条件权也必须在 Curator</b>。</p>
+            <p><b>数据挂 binding 不挂 profile：</b>profile 是身份与凭证，一个 Claude 订阅会被多个角色共用，但 Arranger 与 Fresh Ears 要不同的档。新增 <code>RoleRuntimePolicy{role_instance_id, model, effort, fallback_model, updated_at, updated_by}</code>。<b>model 存字符串不做 enum</b> —— 模型迭代太快，enum 会变成维护负担。</p>
+            <p class="touch"><b>投射点跟权限同一处</b>（<code>claude_permission_args</code> 旁边加 <code>model_args</code>）：Claude 用 <code>--model</code> / <code>--effort</code> / <code>--fallback-model</code>；Codex 用 <code>-m</code> / <code>-c model_reasoning_effort=</code>，并加 <b><code>--ignore-user-config</code></b> 切断 <code>~/.codex/config.toml</code> 的渗入 —— 不切断就谈不上可复现。错模型名不做静态校验，<b>首次派发失败即停并明确报错</b>，别在 retry 循环里烧三次。</p>
+          </article>
+
+          <p class="ch red">完备性校验 —— 自定义流程的强制项<span class="ver v13">v0.2.x</span></p>
+          <ul class="plain" style="--bc:#f4707a">
+            <li><b>全有或全无。</b>流程是<b>整体 artifact，不是补丁</b> —— 要么整套用内置的，要么用户自己编一整套。不允许「往默认流程里插一个自建角色」这种半自定义状态，否则谁也说不清会发生什么。</li>
+            <li><b>必须有 <code>DISCOVERY</code> 步骤</b>（Producer）—— 得有人负责把问题磨清楚。</li>
+            <li><b>必须有 <code>HUMAN_GATE</code> 步骤</b> —— 得有人类签字才算交付。<span class="d">执行器类型已存在，直接检查即可。</span></li>
+            <li><b>必须至少有一个 <code>VERIFIER</code> 步骤。</b>用户可以自定义它跑什么命令，<b>但不能没有</b> —— 没有确定性验证，「完成」就退回成模型自称，那正是 pi 与 Orca 留空的那块，也是 Curator 唯一的差异化。</li>
+            <li><b>必须存在一个「可达的、其角色具备 workspace 写权限」的步骤。</b>注意校验要落在<b>编译后的 plan</b> 上而不是角色集合上 —— 否则「定义了一个写角色但没有任何步骤引用它」就能绕过，流程照样空转改不动任何东西。</li>
+            <li>外加结构性检查：<b>无环</b> · <code>role_id</code> 是合法 slug（它会变成目录名）· 所有 <code>handoff_rules.to_role_id</code> 指向的角色都存在 · 存在可达的终止条件（不能定义一个永不满足的 <code>done_criteria</code>）。</li>
+            <li class="d">挡得住的是<b>结构缺失</b>，挡不住<b>内容敷衍</b>（比如 verifier 只跑 <code>true</code>）—— 那要靠 <code>/agents</code> 的引导 prompt，以及在 diff 里把「这个 verifier 实际会执行什么命令」显式摊开给人看。</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="warn">
+        <b>为什么这七条现在做而不是以后：</b>判断线是「这个改动是否同时修今天就存在的问题」。
+        权限声明无人执行、<code>.curator/</code> 对 agent 敞开、池分配器没接进交付回路、init 只认枚举、未知模板直接崩 —— <b>全部是今天的洞</b>，不是为未来投机。
+        而角色 CRUD 界面、角色版本管理、角色分享，只在未来有用，推迟。
+      </div>
+
+      <p class="src">依据：本仓库 2026-07-27 实读代码 —— <code>runtime/permissions.py</code> · <code>runtime/action_policy.py</code> · <code>core/paths.py</code> · <code>providers/registry.py</code> · <code>runtime/queue.py</code> · <code>team/roles.py</code> · <code>loops/templates.py</code> · <code>core/models/loops.py</code>。</p>
+    </div>
+
+    <!-- ══════════════ v0.1.13/14 · Producer 台 ══════════════ -->
+    <div class="costs">
+      <h3><span class="phase-tag" style="background:#a78bfa">v0.2.x / v0.3</span>Producer 台 —— 已移出 v0.2.0 关键路径
+        <span class="sub">—— 设计保留，但<b>不进 v0.2.0 关键路径</b>：并行内核不需要 intake、不需要自建角色、不需要实时 steer。<b>唯一例外是「只读活动流」</b>——它单向即可、组件已在，归 <code>v0.1.11</code> 最小 Control Desk。</span>
+      </h3>
+
+      <p class="ch amber">录音室岗位 ↔ 循环相位</p>
+      <table class="mtable">
+        <thead>
+          <tr><th>相位</th><th>phase word</th><th>岗位（display_name）</th><th>席位（label）</th><th>内部 id（不动）</th><th>做什么</th></tr>
+        </thead>
+        <tbody>
+          <tr class="isnew">
+            <td><code>discovery</code><span class="new">新</span></td><td class="pw">Riffing</td>
+            <td class="job">Producer</td><td><code>producer.default</code></td><td><code>producer</code> 新增</td>
+            <td class="dim">跟人聊、只读调研、把问题磨成 goal</td>
+          </tr>
+          <tr>
+            <td><code>plan</code></td><td class="pw">Composing</td>
+            <td class="job">Composer</td><td class="dim">—</td><td><code>pm</code></td>
+            <td class="dim">出 plan：任务分解 + 角色分配 + 依赖</td>
+          </tr>
+          <tr>
+            <td><code>implement</code></td><td class="pw">Arranging</td>
+            <td class="job">Arranger</td><td><code>writer.default</code></td><td><code>engineer</code></td>
+            <td class="dim">唯一有写权限的席位</td>
+          </tr>
+          <tr>
+            <td><code>validate</code></td><td class="pw">Mixing</td>
+            <td class="job">Mix Engineer</td><td class="dim">确定性 verifier，无 LLM 席位</td><td><code>qa</code></td>
+            <td class="dim">跑真实命令，取 git diff 作证</td>
+          </tr>
+          <tr>
+            <td><code>review</code></td><td class="pw">Auditioning</td>
+            <td class="job">Mix Engineer</td><td><b>Fresh Ears</b> <code>reviewer.default</code></td><td><code>qa</code></td>
+            <td class="dim">fresh context 评审 —— 行话就是「特意找没听过这版的人来听」</td>
+          </tr>
+          <tr>
+            <td><code>confirm</code></td><td class="pw">Mastering</td>
+            <td class="job dim">人类</td><td class="dim">—</td><td class="dim">—</td>
+            <td class="dim">HUMAN_GATE，签发</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="tnote">
+        <b>只改展示层，不动内部标识。</b><code>RoleName</code> 有 192 处引用（src 65 / tests 127），值落进 <b>12 个 SQLite 列</b>，还是用户磁盘上 <code>.curator/roles/pm/role.md</code> 的目录名 —— v0.1.0 已公开发布，为改名做数据迁移不值。
+        岗位名落在 <code>roles/registry.py</code> 的 <code>display_name</code>（3 行），席位名落在 <code>role_pool.py</code> 的 label（3 行），相位词落在 <code>shell_app.py:47</code> 的 <code>_PHASE_WORDS</code>。<code>RoleName.PRODUCER</code> 与 <code>LoopStepType.DISCOVERY</code> 是<b>增量新增</b>，不影响既有行。
+      </p>
+
+      <div class="sect"></div>
+
+      <div class="grid">
+        <div>
+          <p class="ch red">调研结论 —— 这件事上两家给不了什么</p>
+
+          <article class="cost" style="--cc:#f0a24b">
+            <div class="hd"><span class="sev" style="background:#f0a24b">Orca</span><b>它的并行是「同题竞赛」，不是「分解」</b></div>
+            <p class="now">官方 first-session 六步：加仓库 → 建 worktree → 选 agent → 重复两次 → 分屏 → 比 diff。原话是 <b>“Paste the same prompt into each. Three branches. Three diffs.”</b></p>
+            <p><b>racing ≠ decomposition。</b>三个 agent 做<b>同一件事</b>，人挑赢家 —— 这种并行<b>根本不需要 plan</b>。你要的是一个 plan 切成有依赖的多 task 并行，Orca 的默认流程不支持。</p>
+            <p>它的 coordinator + Task DAG 是 experimental 旁支，DAG 由一个 LLM coordinator <b>现场编</b>，没有持久 plan artifact，分解与拓扑都靠即兴。</p>
+            <p class="touch"><b>可拿：</b>worktree 独占 lease · ready queue · DecisionGate · bounded concurrency 起步 2。<b>不可拿：</b>它的 intake（它没有）。</p>
+          </article>
+
+          <article class="cost" style="--cc:#5aa9f5">
+            <div class="hd"><span class="sev" style="background:#5aa9f5">pi</span><b>没有 plan mode，subagent 只是 example</b></div>
+            <p class="now">agent 用 markdown + frontmatter 声明，字段只有 <code>name / description / tools / model</code>，body 作 systemPrompt。链式靠 <code>{previous}</code> 占位符串接，4 并发 / 8 排队，回传父模型截断 50KB。Skills 有实验性 <code>allowed-tools</code>。</p>
+            <p class="touch"><b>可拿：</b>工具集限制（让讨论台<b>结构上</b>无法实现）· session 树 fork（讨论分叉、goal 从选定节点 fork）· 并发闸与回传截断这两条工程细节 · compaction（长讨论必然需要）。</p>
+          </article>
+
+          <article class="cost" style="--cc:#43e2a4">
+            <div class="hd"><span class="sev" style="background:#43e2a4">你已领先</span><b>角色模型：Curator 比两家都富</b></div>
+            <p class="now"><b>pi agent：</b>name · description · tools · model　｜　<b>Orca：</b>无角色概念</p>
+            <p><b>Curator <code>RoleContract</code>：</b>responsibilities · when_to_involve · expected_evidence_kinds · <b>forbidden_actions</b> · <b>capability_tags</b> · <b>collaborators</b> · <b>handoff_rules</b>；外加 <code>RoleSelection</code>（matched_signals / score / reason）。</p>
+            <p><b>推论：</b>Orca 要让 LLM 现场发明 DAG 拓扑，<b>你不必</b> —— <code>handoff_rules</code> + <code>collaborators</code> 已经声明了谁交接给谁，<b>拓扑可推导，只让模型做任务分解</b>。让模型少发明一样东西，就少一处不可验证的地方。</p>
+          </article>
+        </div>
+
+        <div>
+          <p class="ch green">仓库现状 —— 已经在的（2026-07-27 实读）</p>
+          <ul class="plain" style="--bc:#43e2a4">
+            <li><b>数据层全套已建：</b><code>DiscoveryStatus</code>(active/accepted/cancelled) · <code>DiscoverySessionRecord</code> · <code>GoalDraftRecord</code> + <code>goal_drafts</code> 表 · <code>DiscussionTurnRecord</code> + <code>discussion_turns</code> 表 · 全套 insert/load。</li>
+            <li><b>只读强制力已就位：</b><code>permissions.py:26</code> 把 <code>MAIN_DECK_SLOT</code> 与 reviewer 一起判为只读 → Claude 得 <code>--permission-mode plan --allowedTools Read,Grep,Glob</code>，Codex 得 <code>--sandbox read-only</code>。「不给方案、不做实现」的结构性保证<b>已经写好了</b>。</li>
+            <li><b>退出机制已有：</b><code>_execute_human_gate_step</code> 写 <code>HUMAN_HANDOFF</code> 决策 + pause metadata，可中断可恢复 —— Producer 台的退出条件直接复用，不必发明。</li>
+          </ul>
+
+          <p class="ch red">仓库现状 —— 缺的</p>
+          <ul class="plain" style="--bc:#f4707a">
+            <li><b>讨论里没有 agent：</b><code>insert_discussion_turn</code> 全仓库唯一调用点（<code>repl.py:1139</code>）写死 <code>role="user"</code>，全仓库搜不到 <code>role="assistant"</code>。只记录用户单侧发言。</li>
+            <li><b>没有派发：</b><code>scheduler/</code> 与 <code>loops/</code> 里 <code>discovery</code> <b>零命中</b> —— 没有 loop step，没有 provider 调用。</li>
+            <li><b>goal 没被真正生成：</b><code>propose_goal</code>(<code>goals/store.py:62</code>) 是确定性模板，<code>summary = cleaned_request</code>，goal 就是用户原话。</li>
+            <li><b>槽位收了绑定却不执行：</b><code>_SINGLE_WRITER_SLOTS</code>(<code>compiler.py:173</code>) 只映射 <code>IMPLEMENT→writer</code>、<code>REVIEW→reviewer</code>。</li>
+            <li><b>conflation 未拆：</b><code>role_pool.py:34</code> 仍把 <code>maindeck.default</code> 绑成 <code>RoleName.PM</code>，标签 “PM (main deck)”。</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="sect"></div>
+
+      <div class="grid">
+        <div>
+          <p class="ch blue">Producer 台该长什么样<span class="ver v13">v0.2.x</span></p>
+          <ul class="plain" style="--bc:#5aa9f5">
+            <li>新增 <code>discovery</code> loop template：一个 DISCOVER step 派发到 slot <code>producer</code>（权限已就位），循环到 human gate 为止。</li>
+            <li><b>产物必须是类型化 artifact，不是聊天摘要</b> —— 把 Curator 的证据主张用在 intake 上。<code>GoalDraft</code> 应含：问题陈述 · <b>已排除的方案及理由</b> · 未决问题 · 读过哪些文件的 evidence refs · 建议角色集合 · <code>RoleSelection</code> 理由。</li>
+            <li>退出条件复用现有 <code>HUMAN_GATE</code>：人说「开始」= 一条 <code>LoopDecisionRecord</code> + pause。别发明新机制。</li>
+            <li><b>讨论天然会分叉</b>（「要是换个思路呢」）。但<b>不要复用 <code>Execution.parent_execution_id</code></b> —— 那条血缘表达的是<b>重试与派发尝试</b>，语义不同。Producer 的讨论分支应是<b>独立模型</b>（<code>DiscussionBranch</code>），与任务依赖、执行血缘、事件因果并列为第四种关系。</li>
+            <li>拆 conflation：<code>maindeck.default → RoleName.PM</code> 换成 <code>producer.default → RoleName.PRODUCER</code>；<code>Control Deck</code> 一词永远只指确定性 TUI 座舱。</li>
+          </ul>
+        </div>
+
+        <div>
+          <p class="ch blue">功能二 · <code>/agents</code> 用对话编排自己的工作流<span class="ver v13">v0.2.x</span></p>
+          <ul class="pipe">
+            <li><b><code>/agents</code> + 一句自然语言</b> —— 「我要一个安全审计员在测试之前评审」。用户不填表，只描述意图。</li>
+            <li><b>固定的意图识别 prompt + 用户输入</b> —— prompt 存在 <code>.curator/prompts/agents.md</code>，<b>必须写死结构化提取要求</b>：字段清单与 <code>RoleContract</code> / <code>LoopTemplate</code> / <code>RoleRuntimePolicy</code> 一一对应，只输出 JSON、不夹解释。<span class="d">注意这是注入面：它可编辑就意味着仓库能改写它，必须纳入 trust 门控。</span></li>
+            <li><b>交给 Producer 绑定的那个真实 provider</b>（claude-code / codex）。<b>它不能读 <code>.curator/</code></b> —— P0 边界规定任何 agent 进程都不得读写治理状态。「修改」而不只是「新增」靠的是：控制平面注入一份<b>经过过滤的、版本化的 <code>GovernanceSnapshot</code></b>（现有 role_id 与 display_name、capability_tags、handoff 边、模板步骤序列），<b>不含</b>凭据、账本原始记录与任何可写句柄。<span class="d">snapshot 带版本号，落盘时用它做乐观并发校验——基于旧快照生成的提案会被拒绝。</span></li>
+            <li><b>问答必须收齐 model 与 effort。</b>Producer 可以给<b>有依据的</b>建议（它读得到<b>工作区内的项目文件</b>、并从 <code>GovernanceSnapshot</code> 拿到 <code>capability_tags</code>，能说「这是只读评审角色，中档够用」），但<b>默认值不能由模型定，必须用户确认</b> —— 理由同 v0.1.6 的「运行条件收权」：运行条件权在人和 Curator 手里。</li>
+            <li class="deny"><b>它输出结构化 <code>WorkflowDraft</code>（JSON），不是文件写入。</b>而且<b>不靠 prompt 自觉 —— 两个 CLI 都有原生 schema 开关</b>：<code>claude --json-schema &lt;schema&gt;</code>、<code>codex exec --output-schema &lt;FILE&gt;</code>。约束落在 CLI 层，再用现成 pydantic 复校一次。</li>
+            <li><b>控制平面校验</b> —— 契约 schema → 完备性（见 v0.1.8）→ 环检测 → slug 合法。失败就<b>把校验错误回灌给模型重试</b>，复用现有 retry-carries-evidence 的机制；重试 N 次仍不过就交给人手改，不无限循环。</li>
+            <li><b>展示多文件 diff</b> —— 必须显式标出<b>被连带修改的其他角色契约</b>，以及 verifier 实际会执行什么命令。</li>
+            <li class="gate"><b><code>HUMAN_GATE</code></b> —— 可拒绝、可暂停、账本里查得到谁批的、批的是哪一版。</li>
+            <li class="gate"><b>控制平面持 <code>project_write_lock</code> 落盘 + 入账</b>（before/after hash）。</li>
+          </ul>
+
+          <ul class="plain" style="--bc:#f4707a">
+            <li><b>为什么不让模型直接写配置：</b><code>v0.1.3</code> 的 P0 边界已定 —— <code>.curator/</code> 对任何 agent 槽位关闭，靠的是 <b>cwd 限定 + OS sandbox 拒绝</b>。<b>注意这里不能说「兜底是 verifier 拒绝触及它的 diff」</b>：<code>.curator/</code> 被 gitignore <b>且</b> 被 <code>_is_curator_state()</code> 滤出 porcelain，那个 diff <b>永远不会出现</b>，规则一次都不会触发。让 Producer 直接改角色配置，等于亲手打开「agent 改写管着 agent 的治理」这个洞，<b>而且没有任何一层会拦住它</b> —— 这正是必须走「模型只出提案、控制平面落盘」的原因。</li>
+            <li><b>加这一层间接，用户零感知：</b>敲一句、看个 diff、按确认，角色就出现了 —— 体验完全相同，区别只在<b>写的那只手是确定性代码</b>。白送三样：可校验、可拒绝、可回滚。</li>
+          </ul>
+
+          <ul class="plain" style="--bc:#a78bfa">
+            <li><b>一个角色 = 三件产物：</b>契约文件 + 角色实例 <code>&lt;id&gt;.default</code> + provider binding。可选第四件：loop template 里的一步。</li>
+            <li><b>图是双向的。</b><code>handoff_rules</code> 长在<b>源</b>契约上 —— 要让 Mix Engineer 把活交给新角色，改的是 <b>Mix Engineer 的契约</b>。所以产物是<b>多文件 diff 提案</b>，不是单个契约。</li>
+            <li><b>光有角色不干活。</b>没有任何 loop template 引用它，永远不会被派发 —— 必须显式标注「未接线」，否则用户建完什么都没发生还不知道为什么。</li>
+          </ul>
+
+          <p class="ch blue">Producer 该问什么 —— 从契约字段反推</p>
+          <ul class="plain" style="--bc:#a78bfa">
+            <li>它读代码还是改代码？ → <code>forbidden_actions</code>（<b>默认只读</b>，要写权限得明确说）</li>
+            <li>什么时候该叫它？ → <code>when_to_involve</code> / <code>capability_tags</code>（扫完项目给候选：这仓库有 pytest / ruff / 前端构建，你要哪类信号）</li>
+            <li>做完谁接手？ → <code>handoff_rules</code>（列出现有角色让选，<b>并提示这会改对方的契约</b>）</li>
+            <li>交出什么才算数？ → <code>expected_evidence_kinds</code>（接进完成判定的关口，不能跳过）</li>
+            <li>用哪个 provider？属于哪个能力类别？ → binding + <code>RoleName</code> 四选一</li>
+            <li><b>答案直接就是契约字段</b>，不需要模型二次翻译 —— 少一层自由发挥，少一处不可验证。</li>
+          </ul>
+
+          <p class="ch green">确认是一个 gate，不是一句提示</p>
+          <ul class="plain" style="--bc:#43e2a4">
+            <li><b>先校验再给人看</b> —— <code>validate_role_contracts</code> 先跑，别让用户批准一个加载不了的契约。</li>
+            <li><b>展示 diff 不是展示文件</b> —— 尤其显式列出<b>被连带修改的其他角色契约</b>。</li>
+            <li><b>展示图的变化</b> —— 新增哪些边、有没有成环、是否被任何模板引用。</li>
+            <li>复用 <code>HUMAN_GATE</code>：可拒绝、可暂停、账本里查得到谁批的、批的是哪一版。</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="sect"></div>
+
+      <div class="grid">
+        <div>
+          <p class="ch blue">日常改设置 —— 短形式保留，但发现性要做足</p>
+          <ul class="plain" style="--bc:#5aa9f5">
+            <li><b>短形式就是主形式：</b><code>/arranger opus-5 high</code>。长形式 <code>/role arranger model opus-5 effort high</code> 永远可用，作为逃生通道。</li>
+            <li><b>撞名规则写死：</b>角色可自定义 → 必然有人建出叫 <code>model</code> 或 <code>help</code> 的角色。<b>内置命令永远优先</b>；只有不撞名时 <code>/{rolename}</code> 才注册为别名；撞名时明确提示「该名与内置命令冲突，请用 <code>/role &lt;name&gt; ...</code>」。</li>
+            <li><b>四处主动告知，不靠用户猜：</b>
+              <br>① <code>/roles</code> 列表每行直接印出可用短命令
+              <br>② 建完角色的确认信息里直接给出那一行
+              <br>③ 注册进 slash 补全（<code>tui/palette.py</code> 的 <code>SlashPalette</code> 已有）
+              <br>④ <code>/help</code> 里单列一节「角色运行设置」</li>
+            <li><b>每次变更入账：</b>谁改的、改前改后、什么时候。出问题第一个要查的就是「是不是有人把 Fresh Ears 降到 low 了」。走角色契约变更同一条通道。</li>
+          </ul>
+        </div>
+
+        <div>
+          <p class="ch green">感知 —— 三个位置缺一不可</p>
+          <ul class="plain" style="--bc:#43e2a4">
+            <li><b>静态：</b><code>/roles</code> 每行 <code>角色 · provider · model · effort</code>，并把<b>当前调度并发上限 × 各角色档位</b>的成本量级算出来摆在一起。</li>
+            <li><b>运行中：</b>TUI 忙碌行带上当前 step 的 model/effort —— <code>shell_app.py:47</code> 的 <code>_PHASE_WORDS</code> 指示器已经在，加个后缀即可（<code>Arranging · opus-5/high</code>）。</li>
+            <li><b>回放：</b><code>ProviderRunRecord</code> 存<b>实际生效值</b>而非配置值。这条是分水岭 —— 配置可能在运行途中被改，账本必须记那一次真正用的。</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="sect"></div>
+
+      <div class="grid">
+        <div>
+          <p class="ch blue">运行视图 —— 让人看得见 agent 在动什么<span class="ver v11">只读流 v0.1.11</span><span class="ver v13">可输入 v0.2.x</span></p>
+
+          <article class="cost" style="--cc:#43e2a4">
+            <div class="hd"><span class="sev" style="background:#43e2a4">A · 单向即可</span><b>活动流：组件已经写好了，缺多路复用</b></div>
+            <p class="now"><b>现状：</b><code>shell_app.py:340-386</code> 已有完整的活动块 —— <code>_note_tool_call</code> 把同类工具调用合并成 <code>⏺ Edit ×3  compiler.py:173</code>，<code>_flush_tool_group</code> 在切换工具时落一行摘要进 transcript，<code>#activity</code> 负责实时显示。<code>render_provider_event</code> 已渲染 TOOL_CALL 的 detail。</p>
+            <p><b>缺的只是前缀与分组：</b>按 <code>(goal, role)</code> 多路复用，每行带 <code>[A · Arranger]</code> 前缀。<b>这一项单向流就够，今天就能做。</b></p>
+            <p><b>两家 provider 的解析器也都齐了：</b>Claude 侧 <code>claude_code.py</code> 解 stream-json；Codex 侧 <code>codex_cli.py:66-77</code> 已把 <code>command_execution</code> / <code>file_change</code> / <code>patch</code> 映射成 TOOL_CALL，<code>_codex_change_paths</code> 直接给出改动路径。<b>所以「谁改了哪些文件」在两个座位上都是现成的</b>——包括残血的 codex 座位。</p>
+            <p><b>流文件活动，不流 transcript。</b>「哪个 agent 改了哪些代码、看了哪些文件」正是 TOOL_CALL 的 detail，比散文摘要精确得多。<b>不要流 <code>message_update</code> 的 token 增量</b> —— 是噪音，多目标时会瞬间淹掉一切，且没有任何信息是 tool call 给不了的。</p>
+            <p><b>默认过滤要有偏向：</b>写操作 / gate / 证据产出全流；读操作折叠成计数（<code>Read ×7 · providers/</code>），按键展开。</p>
+            <p class="touch"><b>必须分区，不能混进对话流</b> —— Producer 的对话待在自己的区域，活动流在另一区。否则跟 Producer 说三句话就被 21 个 agent 的日志顶出屏幕。</p>
+          </article>
+
+          <article class="cost" style="--cc:#5aa9f5">
+            <div class="hd"><span class="sev" style="background:#5aa9f5">B · 需要双向</span><b>「像 Orca 点开独立窗口」—— 要的是体验，不是 PTY</b></div>
+            <p class="now"><b>先把两者拆开：</b>PTY 是 Orca 拿到那个体验的<b>手段</b>，不是体验本身。它必须用 PTY，是因为它驱动黑盒 CLI，除了转发终端字节流没有别的办法。</p>
+            <p><b>你有别的办法：</b>双向通道给你一个活的、可输入的会话，窗口由 Curator 自己渲染。</p>
+            <p><b>真 PTY：</b>拿到 agent 自己的 TUI 外观（spinner / 边框 / 配色）——代价是那一屏<b>抓不住、不可回放、不可搜索</b>，且每个 provider 长得不一样。</p>
+            <p><b>结构化窗口：</b>外观由你画（<b>跨 provider 统一</b>），每个字节同时进账本（<b>可回放</b>）、可搜索、可按 goal 过滤。<b>比 Orca 那个更好，因为它那个窗口里的东西是抓不住的。</b></p>
+            <p class="touch"><b>分两步落地：</b><b>只读窗口两家都能有，先做</b>（事件流已足够）；<b>可输入</b>那一层等双向通道，且<b>只在 Claude Code 座位出现</b> —— codex 座位就停在只读，并按上面的告知规则标明。</p>
+          </article>
+
+          <article class="cost" style="--cc:#f4707a">
+            <div class="hd"><span class="sev" style="background:#f4707a">C · 逃生口</span><b><code>/attach</code> 真 PTY —— 可以有，但必须诚实标记</b></div>
+            <p class="now"><b>唯一真需要 PTY 的场景：</b>agent CLI 干了协议没建模的事 —— 冒出新的交互提示、要走 OAuth 登录、进了它自己的调试模式。</p>
+            <p class="touch"><b>条件：</b>那段时间发生的事<b>不进账本</b>；退出后该次 execution 标记 <code>manually_touched</code>，它产出的证据<b>降级</b>，不能当作「验证通过」的依据。<b>留逃生口可以，假装它是完整记录不行</b> —— 那会毁掉整个可回放的主张。</p>
+          </article>
+        </div>
+
+        <div>
+          <p class="ch blue">介入 —— steer messages 的两级模型<span class="ver v13">v0.2.x</span></p>
+          <ul class="plain" style="--bc:#5aa9f5">
+            <li><b>协议层是<span style="color:var(--gap)">不对称</span>的：</b>Claude Code 有 <code>--input-format stream-json</code>；<b><code>codex exec</code> 是明确的非交互</b>（见 <code>v0.1.8</code> 的 ★ 卡片）。所以 <b>agent 级 steer 目前只在 Claude Code 座位上成立</b>，codex 座位要靠 goal 级。</li>
+            <li><b>但 Curator 比 Codex 多一层要求：steer 改变了目标的约束，必须入账。</b>用户中途说「顺便把 null 的情况也处理了」——若只是透传进对话，回放时「writer 当时为什么这么写」就答不出来。<b>steer 不是透传，是类型化事件。</b></li>
+          </ul>
+
+          <ul class="pipe">
+            <li><b>goal 级</b> —— 适用于该目标<b>剩余所有步骤</b>。变成 goal contract 里的一条 <code>constraint</code>，重新打进后续每一步的 context package。入账：谁说的、什么时候、影响了哪些后续 step。<span class="d">Codex 没有这一级，因为它没有 goal 这一层。</span></li>
+            <li><b>agent 级</b> —— 只给当前正在跑的那个 agent，走 live channel 的 <code>steer</code>，立刻打断当前 turn。入账：挂在那次 execution 上。</li>
+            <li><b>agent 不在跑时</b>（两步之间、或在等 gate）：goal 级 steer <b>排队</b>，下次打包 context 时生效。这个状态要显式建模。</li>
+          </ul>
+
+          <ul class="plain" style="--bc:#a78bfa">
+            <li>pi 的两个命令正好对上这个区分：<code>steer</code> = <b>立刻打断</b>当前 turn；<code>follow_up</code> = <b>排队</b>，等这一轮结束再进。</li>
+            <li><b>注意边界：</b>steer 是给<b>正在执行的目标</b>补充信息，不是重新讨论。要改目标本身，回 Producer 走 discovery，重新过 gate。</li>
+          </ul>
+
+          <p class="ch green">建议顺序 —— 不需要前置的先做</p>
+          <ul class="plain" style="--bc:#43e2a4">
+            <li><b>现在</b> —— 活动流加 <code>(goal, role)</code> 前缀 + 多路复用 + 读操作折叠（组件已在、单向即可、<b>两家 provider 都吃得到</b>）</li>
+            <li><b>紧接着</b> —— <b>goal 级 steer + 入账</b>（也不需要双向通道，<b>两家都能做</b>，价值最高的那一半）</li>
+            <li><b>v0.1.8</b> —— <code>provider_capability_manifest</code>：<b>只做能力声明与告知</b>（绑定时展示能力矩阵、codex 残血明说），<b>不做交互</b></li>
+            <li><b>v0.2.x</b> —— driver 双向化 → agent 级 steer / mid-run 权限门 / peek 可回复（按 capability 显示，<b>目前只在 Claude Code 座位上</b>）</li>
+            <li><b>v0.2.x</b> —— 可输入的结构化独立窗口（<b>只读窗口归 v0.1.11</b>，更早就能有）</li>
+            <li><b>随后</b> —— <code>/attach</code> PTY 逃生口 + <code>manually_touched</code> 标记</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="warn">
+        <b>这一层划的边界：</b>Producer <b>不给方案、不做实现、不出 plan、不写任何文件</b> —— 功能一只把模糊问题磨成一个有依据、可被拒绝的 <code>GoalDraft</code>；功能二只产出 <code>WorkflowDraft</code>。两者都停在人类 gate 前，落盘一律由控制平面执行。
+        plan 是 Composer 的活，派发是 Scheduler 的活，落盘是控制平面的活。<b>不要因为它叫 Producer 就让它开始指挥</b> —— 那正是 main-deck 上一次撞名踩过的坑。
+      </div>
+
+      <p class="src">依据：Orca 官方文档 first-session / orchestration / worktrees；pi 官方文档 subagent example · skills.md · rpc.md；Curator 现状为本仓库 2026-07-27 实读代码（含 codegraph 索引核对）。命名与相位映射为 2026-07-27 决定，尚未落地到代码。</p>
+    </div>
+
+    <!-- ══════════════ v0.1.5/8/11/12 · 调度与并行 ══════════════ -->
+    <div class="costs">
+      <h3><span class="phase-tag" style="background:#5aa9f5">v0.1.9 · 11 · 12 · 13</span>调度与并行 —— 拓扑推导，而非模型发明
+        <span class="sub">—— Curator <b>也</b>需要 DAG；不需要的是让模型现场发明拓扑。只读角色的并行门槛远低于写角色，先做前者。</span>
+      </h3>
+
+      <div class="grid">
+        <div>
+          <p class="ch green">DAG：边已经声明过了<span class="ver v9">v0.1.9</span></p>
+
+          <article class="cost" style="--cc:#43e2a4">
+            <div class="hd"><span class="sev" style="background:#43e2a4">1 · 物化</span><b><code>RoleHandoffRule</code> 本身就是一条有向边</b></div>
+            <p class="now"><code>trigger</code>（条件）· <code>to_role_id</code>（终点，源就是它所在的契约）· <code>required_evidence</code>（边上的门槛）· <code>reason</code>（为什么有这条边）—— 一条边该有的全有了。<b>边是项目配置，不是模型输出。</b></p>
+            <p><b>遍历机器也已经有了，只是一次只走一条边：</b><code>routing.py:68</code> 的 <code>resolve_handoff</code> 按运行时 trigger 查<b>一条</b>规则、返回一个 decision —— 反应式路由，天然线性。</p>
+            <p class="touch"><b>并行要的不是发明图，是把同一批声明提前展开成完整的图</b>，才看得出哪些 task 互不依赖。这跟 Orca「从零编一张图」是完全不同量级的工作。</p>
+          </article>
+
+          <article class="cost" style="--cc:#f0a24b">
+            <div class="hd"><span class="sev" style="background:#f0a24b">2 · 分工</span><b>模型提议，系统校验</b></div>
+            <p class="now"><code>handoff_rules</code> 推得出<b>角色之间</b>的边，推不出<b>同一角色内多个 task 之间</b>的边（两个 Arranger task：先加迁移还是先改调用方）。</p>
+            <p><b>所以模型仍要出：</b>task 分解 + role 标注 + <code>claimed_paths</code> + 依赖提示。</p>
+            <p><b>但全部可校验：</b>路径对文件系统查、跨角色的边对 handoff 图查一致性、整张图做环检测。这是<b>模型提议、系统校验</b>，不是模型决定。</p>
+            <p class="touch">对照 Orca：coordinator 现场编的拓扑<b>不可验证、不可复现、不能 diff</b>；声明推导的拓扑改了配置账本里查得到用的是哪一版。跟 verifier 不信 provider 自报 <code>passed</code> 是同一个动作。</p>
+          </article>
+        </div>
+
+        <div>
+          <p class="ch amber">多实例：三个约束，难度按角色分层<span class="ver v12">v0.1.12</span></p>
+
+          <article class="cost" style="--cc:#f4707a">
+            <div class="hd"><span class="sev" style="background:#f4707a">3 · 地基</span><b>写锁是项目级的 —— 同目录两个 writer 物理不可能</b></div>
+            <p class="now"><code>project_write_lock(project_root)</code>：锁文件 <code>.curator/runtime.lock</code>，fcntl + 进程内表，<b>可重入但只对同一 thread</b>（<code>owner = threading.get_ident()</code>，别的 owner 直接 <code>ProjectLockedError</code>）。</p>
+            <p class="touch"><b>所以 worktree 不是优化，是多 Arranger 的前置条件</b> —— 锁的粒度必须先从 project 降到 workspace。</p>
+          </article>
+
+          <p class="ch green">因此：只读角色先并行</p>
+          <ul class="plain" style="--bc:#43e2a4">
+            <li><b>多 Fresh Ears / 多 Composer</b> 只需要过 <code>v0.1.8</code> 的角色池 + <code>v0.1.4</code> 的 <b><code>Execution.parent_execution_id</code></b>（执行血缘）—— <b>不需要 worktree，不需要动锁</b>。因为只读角色根本不碰工作区（<code>permissions.py:26</code> 已判为只读）。</li>
+            <li>三个 Fresh Ears 用不同 lens（正确性 / 性能 / 可维护性）并行评审同一个 diff —— 在完全不碰地基的前提下拿到并行的一大块价值，还顺便验证整条「池分配 + 分支记账」链路。</li>
+            <li><b>多 Arranger 才需要过第 3 条。</b></li>
+          </ul>
+
+          <p class="ch red">别忘了账本要能表达并行</p>
+          <ul class="plain" style="--bc:#f4707a">
+            <li><code>LoopIterationRecord</code> 只有 <code>sequence: int</code>，没有 parent、没有 attempt、没有 workspace 归属 —— 三个 Fresh Ears 跑完就是三条递增记录，<b>表达不出「这是同一个 step 的三个并行分支」</b>。</li>
+            <li>所以多实例不是独立特性，<b>它跟 <code>v0.1.4</code> 的不可变 <code>Execution</code> + <code>parent_execution_id</code> 是同一件事的两面</b>。<b>先有执行血缘，并行分支才有地方落。</b><span class="d">注意这里要的是<b>执行血缘</b>，不是 <code>TaskDependency</code>（那是业务依赖）也不是 <code>causation_id</code>（那是事件因果）。</span></li>
+          </ul>
+
+          <p class="ch blue">写角色并行的判定<span class="ver v13">v0.1.13</span></p>
+          <ul class="plain" style="--bc:#f4707a">
+            <li><b><code>claimed_paths</code> 只能当调度提示，<span style="color:var(--gap)">不能当安全判据</span>。</b>模型会漏报：生成物、lockfile、迁移文件、重命名、共享配置、shell 副作用 —— 任何一项漏了，「路径不相交」这个前提就是假的。</li>
+            <li><b>发 lease 时可以保守地用它</b>（相交就不发），<b>但完成时必须用实际 diff 仲裁</b>：<br>
+              ① 采集<b>实际</b> diff → ② 与其他 execution 的<b>实际</b>改动集合比对 → ③ rebase/merge 到组合工作区 → ④ 执行<b>组合验证</b> → ⑤ <b>冲突时进 gate，不自动选胜者</b>。</li>
+            <li>bounded concurrency <b>默认 2、最大 4</b>，并保留一键退回 1。</li>
+            <li><b>语义冲突 worktree 挡不住</b>（你自己的 orca 文档已写）—— 上面第 ④ 步才是真正的兜底。</li>
+          </ul>
+
+          <p class="ch amber">并发上限归调度方，不归角色</p>
+          <ul class="plain" style="--bc:#f0a24b">
+            <li><b>参照 Claude Code：</b>它的三个 subagent 限制 —— 并发 <b>20</b>（<code>CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS</code>）、每会话 <b>200</b>、嵌套 <b>3 层</b> —— <b>全部挂在会话/全局，没有一个挂在 subagent 定义上</b>。它的 agent 文件里有 <code>model</code> / <code>tools</code>，<b>没有 concurrency 字段</b>。</li>
+            <li>所以 Curator 的角色配置<b>不该带 <code>max_concurrency</code></b>：并发是调度器的职责，角色只声明 model + effort。这跟「调度权在 Curator 不在角色」是同一条原则。</li>
+            <li><b>但成本放大要看得见</b> —— <code>3 个 Fresh Ears × 高档位</code> 的消耗是单跑的数倍。这是<b>显示问题不是配置问题</b>：在 <code>/roles</code> 视图里把「并发上限 × 各角色档位」算给人看。配额无法预警（CLI 不暴露余量），只能事前把账摆明。</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="sect"></div>
+
+      <div class="grid">
+        <div>
+          <p class="ch amber">多目标之后：列 goal，不列 agent<span class="ver v11">v0.1.11</span></p>
+
+          <article class="cost" style="--cc:#f0a24b">
+            <div class="hd"><span class="sev" style="background:#f0a24b">1 · 单位</span><b>用户注意力的单位是目标，不是 agent</b></div>
+            <p class="now"><b>Claude Code 能用扁平列表，是因为它的 session 彼此独立</b> —— 一个 session 就是一个工作单元，只有一层结构。</p>
+            <p><b>你有三层：</b><code>Goal → Task DAG → Task → Execution → Workspace</code>。扁平的 agent 列表答不出<b>「谁在等谁」</b>和<b>「这两个 agent 属于同一个目标」</b> —— 而多目标并行时只有这两个问题重要。</p>
+            <p class="touch"><b>所以默认视图每行是一个 goal，agent 是实现细节，展开才出现。</b></p>
+          </article>
+
+          <article class="cost" style="--cc:#f0a24b">
+            <div class="hd"><span class="sev" style="background:#f0a24b">2 · 三级下钻</span><b>层级要对上结构，比 Claude Code 多一级</b></div>
+            <p><b>L0 目标列表</b>（默认）—— 每个 goal 一行：相位 · 聚合状态 · 一句话摘要 · 时长</p>
+            <p><b>L1 单个目标的 DAG</b>（<code>Enter</code>）—— 活状态画在节点上：谁在跑、谁等哪条边的证据、谁被 gate 挡住、占了哪个 worktree</p>
+            <p><b>L2 单个 agent 的事件流</b>（再 <code>Enter</code>）—— <code>ModalScreen</code>，只读（双向通道打通后可输入）</p>
+            <p class="touch">Claude Code 只需两级（列表 → peek/attach），你需要三级。</p>
+          </article>
+
+          <p class="ch red">聚合状态要有优先级，不是罗列</p>
+          <ul class="plain" style="--bc:#f4707a">
+            <li>每个目标行只显示<b>一个</b>派生状态，取最高的：<b>① 需要你</b>（任何 gate / approval 打开 → 永远置顶）→ <b>② 阻塞</b>（没人能推进）→ <b>③ 进行中 n/m</b> → <b>④ 待验证 / 待评审</b> → <b>⑤ 完成</b>。</li>
+            <li>摘要取该目标下<b>最近一次有意义的事件</b>（最近的 TOOL_CALL 或 decision）—— <b>零模型成本</b>。单目标时这是省钱，N 个目标并行时是必须的：显示状态要是得调模型，你光看就在烧配额。</li>
+            <li><b>默认全折叠</b>，否则第一屏就废了。<b>别在输入框下面挂长列表</b> —— 输入框是对话入口不是仪表盘；三个目标 × 七个 task = 21 行滚不动。</li>
+          </ul>
+        </div>
+
+        <div>
+          <p class="ch red">多目标带来的全新要求：跨目标路径仲裁<span class="ver v13">v0.1.13</span></p>
+          <ul class="plain" style="--bc:#f4707a">
+            <li><b><code>claimed_paths</code> 冲突会跨目标发生。</b>Goal A 和 Goal C 都想改 <code>loops/compiler.py</code> —— 单个 plan 内部的路径不相交检查<b>挡不住这个</b>。</li>
+            <li>所以调度器需要<b>跨目标的路径仲裁</b>，UI 需要能说清「C 卡住是因为 A 占着 <code>loops/</code> 的写 lease」。<b>这是单目标时不存在的问题</b>，之前只讨论过单个 plan 内部的不相交。</li>
+          </ul>
+
+          <p class="ch amber">因此多一个资源视图</p>
+          <ul class="plain" style="--bc:#f0a24b">
+            <li>盘上有几个 worktree · 谁拿着写 lease · base ref · 并发额度还剩多少</li>
+            <li>用户提交第三个目标却看不到动静时，<b>唯一能解释的就是这一屏</b>（并发 3/4 · 1 个目标排队中）。</li>
+            <li>顺带把「并发上限 × 各角色档位」的成本量级摆在同一屏 —— 对应 <code>v0.1.8</code> 的「model/effort 收权 + 账本记实际生效值」。</li>
+          </ul>
+
+          <p class="ch green">一条框架边界</p>
+          <ul class="plain" style="--bc:#43e2a4">
+            <li><b>运行监视视图不属于 Producer。</b>Producer 是那个只读的对话 agent，它的面板是<b>你和它谈话的地方</b>。</li>
+            <li>多目标运行态是<b>确定性座舱</b>（Control Deck）的活：渲染它<b>不需要任何 provider 调用</b>，数据全部来自账本与 driver 事件流。</li>
+            <li>同一个 TUI、不同视图。把运行监视塞进 Producer，就是重演 main-deck 那次「把座舱和 LLM 座位混为一谈」的错 —— 而且实际代价是<b>每次刷新状态都要过一个模型</b>。</li>
+          </ul>
+
+          <p class="ch blue">N 个目标之后，人不可能盯着看</p>
+          <ul class="plain" style="--bc:#5aa9f5">
+            <li>面板必须<b>中断驱动</b>：只有「需要你」的东西主动冒泡（终端通知 + 目标行置顶），其它一律拉取式。</li>
+            <li><code>HUMAN_GATE</code> 打开时，通知直接带上问题本身与选项，<b>能在通知层就回答</b>（对应 Claude Code 的 peek 面板可直接回复）。</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="warn">
+        <b>两种并行别混：</b>Orca 默认流程是<b>同题竞赛</b>（三个 agent 做同一件事，人挑赢家）—— 这种并行<b>根本不需要 plan</b>。
+        你要的是<b>分解</b>：一个 plan 切成有依赖的多 task 并行。前者用不上 DAG，后者离不开 DAG。
+      </div>
+
+      <p class="src">依据：本仓库 2026-07-27 实读代码 —— <code>core/models/roles.py</code> · <code>scheduler/routing.py</code> · <code>runtime/lockfile.py</code> · <code>runtime/queue.py</code> · <code>core/models/loops.py</code>；Orca 官方文档 first-session / orchestration。</p>
+    </div>
+
+  </div>
+</div>
+
+<script src="assets/gsap.min.js"></script>
+<script src="assets/ScrollTrigger.min.js"></script>
+<script>
+(() => {
+  const vp = document.getElementById('vp');
+  const canvas = document.getElementById('canvas');
+  const svg = document.getElementById('wires');
+
+  const WIRES = [
+    { n:'1', from:'p-entry',   to:'c-prov',   color:'#43e2a4', head:'ah-core', label:'RPC / JSONL → provider' },
+    { n:'2', from:'p-session', to:'c-ledger', color:'#43e2a4', head:'ah-core', label:'session 树 ≙ 证据账本' },
+    { n:'3', from:'p-gap',     to:'c-verify', color:'#f4707a', head:'ah-gap',  label:'pi 留下的空白' },
+    { n:'4', from:'o-gap',     to:'c-verify', color:'#f4707a', head:'ah-gap',  label:'Orca 留下的空白' },
+    { n:'5', from:'o-wt',      to:'c-loop',   color:'#f0a24b', head:'ah-orca', label:'worktree → 写入边界' },
+    { n:'6', from:'o-coord',   to:'c-sched',  color:'#f0a24b', head:'ah-orca', label:'Task / Gate → 持久 DAG' }
+  ];
+
+  const box = el => {
+    const r = el.getBoundingClientRect(), c = canvas.getBoundingClientRect();
+    return { l:r.left-c.left, t:r.top-c.top, w:r.width, h:r.height,
+             cy:r.top-c.top+r.height/2 };
+  };
+
+  let labels = [];
+  let wirePaths = [];
+
+  function draw(){
+    if (window.gsap) gsap.killTweensOf(wirePaths);
+    wirePaths = [];
+    svg.querySelectorAll('path.wire').forEach(n => n.remove());
+    labels.forEach(n => n.remove());
+    labels = [];
+
+    svg.setAttribute('width',  canvas.scrollWidth);
+    svg.setAttribute('height', canvas.scrollHeight);
+
+    // 卡片区域的左边界 —— 标签一律停在它左边的空白通道里，不压任何卡片
+    const tierLeft = box(document.querySelector('.tier')).l;
+
+    WIRES.forEach((w, i) => {
+      const a = document.getElementById(w.from), b = document.getElementById(w.to);
+      if(!a || !b) return;
+      const s = box(a), t = box(b);
+      const laneX = 34 + i * 29;              // 左侧空白通道，绝不压到卡片
+
+      const d = `M ${s.l} ${s.cy} L ${laneX} ${s.cy} L ${laneX} ${t.cy} L ${t.l} ${t.cy}`;
+      const p = document.createElementNS('http://www.w3.org/2000/svg','path');
+      p.setAttribute('class','wire');
+      p.setAttribute('d', d);
+      p.setAttribute('stroke', w.color);
+      p.setAttribute('stroke-width', '2.2');
+      p.setAttribute('stroke-dasharray', '9 7');
+      p.setAttribute('marker-end', `url(#${w.head})`);
+      p.setAttribute('opacity', '.95');
+      svg.appendChild(p);
+      wirePaths.push(p);
+
+      // 标签右对齐停在卡片区左边界外，纵向对齐源模块 —— 源各不相同，天然不重叠
+      const el = document.createElement('div');
+      el.className = 'wirelabel';
+      el.innerHTML = `<b>${w.n}</b>${w.label}`;
+      el.style.color = w.color;
+      el.style.left = (tierLeft - 12) + 'px';
+      el.style.top  = s.cy + 'px';
+      canvas.appendChild(el);
+      labels.push(el);
+    });
+
+    flowWires();
+  }
+
+  // 连线流动：GSAP 接管（原先的 SMIL 不认 prefers-reduced-motion）
+  function flowWires(){
+    if (!window.gsap || !wirePaths.length) return;
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    gsap.to(wirePaths, { strokeDashoffset: -32, duration: 1.1, repeat: -1, ease: 'none' });
+  }
+
+  // 拖拽平移：只从空白背景起拖，内容区留给文本选择（滚轮 / 触控板始终可用）
+  const CONTENT = '.tier, .wirekey, .costs, .roadmap, .wirelabel';
+  let down = false, px = 0, py = 0, sl = 0, st = 0;
+  vp.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    if (e.target.closest(CONTENT)) return;
+    down = true; px = e.clientX; py = e.clientY;
+    sl = vp.scrollLeft; st = vp.scrollTop;
+    vp.classList.add('dragging');
+    try { vp.setPointerCapture(e.pointerId); } catch { /* 无效 pointerId：照常拖，不捕获 */ }
+  });
+  vp.addEventListener('pointermove', e => {
+    if (!down) return;
+    vp.scrollLeft = sl - (e.clientX - px);
+    vp.scrollTop  = st - (e.clientY - py);
+  });
+  const stop = () => { down = false; vp.classList.remove('dragging'); };
+  vp.addEventListener('pointerup', stop);
+  vp.addEventListener('pointercancel', stop);
+
+  // ── 入场动效：GSAP + ScrollTrigger ─────────────────────
+  // 画布是 #vp 这个 overflow:auto 容器，不是窗口，所有 trigger 都要指定 scroller。
+  // 文档 7000px+ 高，用滚动触发而不是加载即播，否则下半部分的动画用户永远看不到。
+  function animate(){
+    if (!window.gsap || !window.ScrollTrigger) return;   // 库缺失时页面照常可读
+    gsap.registerPlugin(ScrollTrigger);
+
+    gsap.matchMedia().add('(prefers-reduced-motion: no-preference)', () => {
+      const BASE = { scroller: '#vp', start: 'top 92%', once: true };
+
+      // 三层架构只动透明度 —— 连线锚点是 .node 的实际位置，位移会让线画歪
+      gsap.from('.tier', {
+        opacity: 0, duration: .7, stagger: .12, ease: 'power2.out', onComplete: draw
+      });
+      gsap.from('.root', { opacity: 0, x: -18, duration: .6, stagger: .12, delay: .15, ease: 'power2.out' });
+
+      const batch = (sel, from, to, opts = {}) => {
+        const els = gsap.utils.toArray(sel);
+        if (!els.length) return;
+        gsap.set(els, from);
+        ScrollTrigger.batch(els, {
+          ...BASE, ...opts,
+          onEnter: b => gsap.to(b, { ...to, overwrite: true })
+        });
+      };
+
+      // 树的子模块
+      batch('.leaf', { opacity: 0, x: -14 },
+            { opacity: 1, x: 0, duration: .45, stagger: .035, ease: 'power2.out' },
+            { interval: .08, batchMax: 12 });
+
+      // 路线图阶梯
+      batch('.rung', { opacity: 0, y: 24 },
+            { opacity: 1, y: 0, duration: .55, stagger: .1, ease: 'back.out(1.4)' });
+
+      // 改动卡
+      batch('.cost', { opacity: 0, y: 22 },
+            { opacity: 1, y: 0, duration: .5, stagger: .08, ease: 'power2.out' },
+            { batchMax: 4 });
+
+      // 要点列表与连线索引
+      batch('.costs ul.plain li, .wirekey li', { opacity: 0, x: -12 },
+            { opacity: 1, x: 0, duration: .4, stagger: .04, ease: 'power2.out' },
+            { interval: .06, batchMax: 8 });
+
+      // 岗位映射表逐行
+      batch('table.mtable tbody tr', { opacity: 0, x: -16 },
+            { opacity: 1, x: 0, duration: .45, stagger: .06, ease: 'power2.out' });
+
+      return () => ScrollTrigger.getAll().forEach(t => t.kill());
+    });
+  }
+
+  addEventListener('resize', draw);
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(() => {
+      draw();
+      if (window.ScrollTrigger) ScrollTrigger.refresh();
+    });
+  }
+  requestAnimationFrame(() => requestAnimationFrame(() => { draw(); animate(); }));
+})();
+</script>
+</body>
+</html>

@@ -1,13 +1,35 @@
 # Keeps GitHub Actions and Python (uv) dependencies fresh. The github-actions
 # updates also handle version drift on the Actions pinned in CI, so we don't
 # hand-pin them to commit SHAs.
+#
+# target-branch is set on every entry because Dependabot otherwise opens against the
+# default branch (main), while CONTRIBUTING requires PRs to be based on dev. Without
+# it, a merged bump lands on main only and dev's CI keeps testing the old version.
+#
+# Version updates are grouped and monthly: one solo maintainer triaging a separate PR
+# per dependency every week is a treadmill, and five open bumps is what that produced.
+# This caps it at two PRs a month. Security advisories are unaffected — Dependabot
+# raises those as they land, outside this schedule and outside the grouping.
+#
+# One group per ecosystem, matched on patterns alone. Splitting runtime from dev tools
+# would need `dependency-type`, which Dependabot supports for pip but not uv, and a
+# group matching nothing falls back to one PR per dependency — the very sprawl this
+# is meant to remove.
 version: 2
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
+    target-branch: "dev"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
+    groups:
+      github-actions:
+        patterns: ["*"]
   - package-ecosystem: "uv"
     directory: "/"
+    target-branch: "dev"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
+    groups:
+      python-dependencies:
+        patterns: ["*"]
