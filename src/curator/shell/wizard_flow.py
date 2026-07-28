@@ -77,7 +77,7 @@ class SetupFlow:
             Say(
                 "Setup · Step 1/3 — Team seats\n\n"
                 "PM (main deck) plans read-only, Engineer implements, Reviewer verifies read-only.\n"
-                "Custom roles are not selectable in v0.1.0; edit role contracts after setup if needed."
+                "Custom roles are not selectable yet; edit role contracts after setup if needed."
             ),
             Ask(
                 "Use the default team?",
