@@ -70,7 +70,13 @@ class CodexCliDriver(SubprocessDriver):
                     provider_run_id=provider_run_id,
                     sequence=sequence,
                     label=item_type,
-                    payload={"event": event_type, "detail": _codex_tool_detail(item)},
+                    payload={
+                        "event": event_type,
+                        "detail": _codex_tool_detail(item),
+                        # One logical call emits item.started/updated/completed; the id is
+                        # what lets a display coalesce them instead of counting each one.
+                        "item_id": _codex_item_id(item),
+                    },
                 )
             text = item.get("text") or item.get("message")
             if isinstance(text, str) and text:
@@ -129,6 +135,19 @@ class CodexCliDriver(SubprocessDriver):
             baseline=self._baselines.get(spec.id),
             project_root=self.project_root,
         )
+
+
+def _codex_item_id(item: dict) -> str:
+    """Return the id shared by one item's lifecycle events, or "" when absent.
+
+    Codex item field names vary by CLI version, so both spellings are tried; an empty
+    string means the consumer cannot coalesce and should count every event.
+    """
+    for key in ("id", "item_id"):
+        value = item.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return ""
 
 
 def _codex_tool_detail(item: dict) -> str:

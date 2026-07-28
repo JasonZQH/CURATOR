@@ -4,6 +4,20 @@ All notable changes to Curator are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **Codex tool-call counts in the activity block.** One Codex command emits several
+  lifecycle events (`item.started`, then `item.completed`) for the same call, and the
+  coalesced `⏺ label ×N` block counted each of them — reading about 2× high. Events are now
+  folded by item id, so one logical call counts once. Claude Code (one event per call) and
+  the ledger are unchanged. ([#26](https://github.com/JasonZQH/CURATOR/issues/26))
+
+### Changed
+- **Docs numbering unified.** The "Phase 0/1/2/3" and "V1.1–V1.6" ladders are folded into
+  the single `v0.1.x` roadmap; the affected design docs carry a mapping banner and the new
+  `pi · Curator · Orca architecture` doc is linked from every page as the canonical roadmap.
+
 ## [0.1.0] — Phase 0
 
 First public release. Local, single-writer, sequential — the evidence-driven base the V1

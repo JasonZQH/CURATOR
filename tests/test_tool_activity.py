@@ -13,14 +13,21 @@ from curator.providers.events import ProviderEvent, ProviderEventKind
 from curator.tui.shell_app import _one_line, CuratorShellApp
 
 
-def _tool(label: str, detail: str) -> ProviderEvent:
-    """Return a TOOL_CALL event carrying a tool name and a command/path detail."""
+def _tool(label: str, detail: str, item_id: str = "") -> ProviderEvent:
+    """Return a TOOL_CALL event carrying a tool name and a command/path detail.
+
+    ``item_id`` mirrors what the Codex adapter attaches so one logical call's several
+    lifecycle events can be coalesced; providers without lifecycle events omit it.
+    """
+    payload: dict = {"detail": detail}
+    if item_id:
+        payload["item_id"] = item_id
     return ProviderEvent(
         kind=ProviderEventKind.TOOL_CALL,
         provider_run_id="p",
         sequence=0,
         label=label,
-        payload={"detail": detail},
+        payload=payload,
     )
 
 
@@ -99,6 +106,58 @@ def test_a_new_tool_type_flushes_the_previous_group(tmp_path):
             assert any("command_execution" in block for block in app.transcript)
             live = str(app.query_one("#activity", Static).render())
             assert "file_change" in live and "src/app.py" in live
+
+    asyncio.run(run())
+
+
+def test_lifecycle_events_of_one_call_count_once(tmp_path):
+    """Verify a Codex item's started/updated/completed events read as one call, not three.
+
+    Shapes taken from a real `codex exec --json` run: one shell command emits
+    `item.started` then `item.completed` sharing `item.id`, and the terminal event
+    carries the fuller detail (the exit code).
+    """
+
+    async def run() -> None:
+        app = CuratorShellApp(project_root=tmp_path)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app._on_provider_event(_tool("command_execution", "echo ok", "item_1"))
+            app._on_provider_event(_tool("command_execution", "echo ok", "item_1"))
+            app._on_provider_event(_tool("command_execution", "echo ok (exit 1)", "item_1"))
+            app._on_provider_event(_tool("command_execution", "pytest -q", "item_2"))
+            app._on_provider_event(_tool("command_execution", "pytest -q", "item_2"))
+            await pilot.pause()
+
+            assert app._tool_group_count == 2  # two commands, five lifecycle events
+            live = str(app.query_one("#activity", Static).render())
+            assert "×2" in live and "×5" not in live
+
+            app._on_provider_event(_text("done"))
+            await pilot.pause()
+            summary = next(b for b in app.transcript if "command_execution" in b)
+            assert "2 calls" in summary
+            assert app._tool_group_ids == set()  # a new group starts counting fresh
+
+    asyncio.run(run())
+
+
+def test_repeated_lifecycle_event_still_refreshes_the_detail(tmp_path):
+    """Verify the terminal event's detail wins even though it does not add to the count."""
+
+    async def run() -> None:
+        app = CuratorShellApp(project_root=tmp_path)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app._on_provider_event(_tool("command_execution", "ruff check src", "item_1"))
+            app._on_provider_event(
+                _tool("command_execution", "ruff check src (exit 1)", "item_1")
+            )
+            await pilot.pause()
+
+            assert app._tool_group_count == 1
+            live = str(app.query_one("#activity", Static).render())
+            assert "exit 1" in live and "×" not in live
 
     asyncio.run(run())
 

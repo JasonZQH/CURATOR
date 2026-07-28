@@ -203,6 +203,38 @@ def test_codex_driver_parses_item_events(tmp_path):
     assert driver._final_text["harness-001"] == "done"
 
 
+def test_codex_tool_call_carries_the_item_id_shared_by_its_lifecycle(tmp_path):
+    """Verify both lifecycle events of one command carry the same id, so it counts once.
+
+    Line shapes are copied from a real `codex exec --json` run.
+    """
+    driver = CodexCliDriver(tmp_path, slot="writer")
+    started = (
+        '{"type":"item.started","item":{"id":"item_1","type":"command_execution",'
+        '"command":"/bin/zsh -lc \'echo ok\'","exit_code":null,"status":"in_progress"}}'
+    )
+    completed = (
+        '{"type":"item.completed","item":{"id":"item_1","type":"command_execution",'
+        '"command":"/bin/zsh -lc \'echo ok\'","exit_code":0,"status":"completed"}}'
+    )
+
+    events = [driver.parse_event(line, "harness-001", i) for i, line in enumerate((started, completed))]
+
+    assert [event.kind for event in events] == [ProviderEventKind.TOOL_CALL] * 2
+    assert {event.payload["item_id"] for event in events} == {"item_1"}
+
+
+def test_codex_tool_call_without_an_id_stays_uncoalesced(tmp_path):
+    """Verify a CLI version that omits the id yields "", leaving every event counted."""
+    driver = CodexCliDriver(tmp_path, slot="writer")
+    line = '{"type": "item.completed", "item": {"type": "command_execution"}}'
+
+    event = driver.parse_event(line, "harness-001", 1)
+
+    assert event is not None
+    assert event.payload["item_id"] == ""
+
+
 def _git(root, *args):
     """Run a git command in a throwaway repo."""
     return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=False)
