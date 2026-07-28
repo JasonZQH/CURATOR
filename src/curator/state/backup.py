@@ -36,11 +36,22 @@ def backup_ledger(
     directory.mkdir(parents=True, exist_ok=True)
 
     destination_path = _free_backup_path(directory, archive_stamp(now))
-    destination = sqlite3.connect(destination_path)
+    # Write under a name the restore path ignores, then publish by renaming. sqlite3.connect
+    # creates the file up front, so a backup that dies half way — disk full, I/O error,
+    # killed process — would otherwise leave a truncated file carrying the real name. That
+    # file is the newest, so it becomes what doctor offers as the restore point, and copying
+    # it over a live ledger destroys the ledger. Only a completed backup gets the real name.
+    partial_path = destination_path.with_suffix(".partial")
     try:
-        connection.backup(destination)
-    finally:
-        destination.close()
+        destination = sqlite3.connect(partial_path)
+        try:
+            connection.backup(destination)
+        finally:
+            destination.close()
+        partial_path.replace(destination_path)
+    except BaseException:
+        partial_path.unlink(missing_ok=True)
+        raise
     return destination_path
 
 
@@ -54,7 +65,13 @@ def latest_pre_migration_backup(curator_dir: Path) -> Path | None:
     if not directory.is_dir():
         return None
 
-    backups = list(directory.glob(f"curator-*{PRE_MIGRATION_SUFFIX}.sqlite"))
+    # An empty file is never a usable ledger, and this path tells someone what to copy over
+    # a live one, so anything that cannot be a backup is skipped rather than offered.
+    backups = [
+        path
+        for path in directory.glob(f"curator-*{PRE_MIGRATION_SUFFIX}.sqlite")
+        if path.stat().st_size > 0
+    ]
     if not backups:
         return None
     # By mtime, not by name: a same-second backup is disambiguated with an index that

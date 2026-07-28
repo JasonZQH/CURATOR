@@ -19,6 +19,12 @@ All notable changes to Curator are documented here. The format follows
   it still answers when the ledger will not open.
 
 ### Fixed
+- **A failed backup is never offered as a restore point.** `sqlite3.connect` creates the
+  destination up front, so a backup interrupted by a full disk, an I/O error, or a killed
+  process left a truncated file carrying the real name. Being the newest, it became what
+  `curator doctor` advertised as the ledger to restore — and copying it over a live ledger
+  would have destroyed it. Backups are now written under a name the restore path ignores and
+  renamed into place only once complete, and an unusable file is never advertised.
 - **A failed migration no longer leaves a half-migrated ledger.** Pending migrations and
   their `schema_version` rows now share one transaction, so a failure rolls the schema
   changes back with it instead of stopping in an intermediate state and raises

@@ -195,6 +195,49 @@ def test_doctor_points_at_the_newest_backup_with_a_restore_command(tmp_path, mon
     assert "cp " in check.detail and "curator.sqlite" in check.detail
 
 
+def test_a_failed_backup_is_never_offered_as_a_restore_point(tmp_path, monkeypatch):
+    """Verify a backup that dies half way cannot become what doctor tells you to restore.
+
+    sqlite3.connect creates the destination up front, so a failure mid-copy used to leave a
+    truncated file carrying the real name. Being newest, it shadowed every good backup — and
+    the restore command copies it over the live ledger, destroying it.
+    """
+    from curator.state.db import CuratorConnection
+
+    curator_dir = build_curator_paths(tmp_path).curator_dir
+    connection = _open(tmp_path)
+    initialize_database(connection)
+    good = backup_ledger(connection, curator_dir)
+
+    def _explode(self, target, **kwargs):
+        """Fail the way a full disk does — after the destination file already exists."""
+        raise sqlite3.OperationalError("disk I/O error")
+
+    monkeypatch.setattr(CuratorConnection, "backup", _explode, raising=False)
+    with pytest.raises(sqlite3.OperationalError):
+        backup_ledger(connection, curator_dir)
+    monkeypatch.undo()
+
+    assert _backups(tmp_path) == [good]  # the failed attempt left nothing behind
+    assert latest_pre_migration_backup(curator_dir) == good
+    assert not list(ledger_archive_dir(curator_dir).glob("*.partial"))
+    connection.close()
+
+
+def test_an_empty_backup_file_is_not_offered_as_a_restore_point(tmp_path):
+    """Verify a zero-byte file in the archive never becomes the advertised restore point."""
+    curator_dir = build_curator_paths(tmp_path).curator_dir
+    connection = _open(tmp_path)
+    initialize_database(connection)
+    good = backup_ledger(connection, curator_dir)
+
+    stray = ledger_archive_dir(curator_dir) / "curator-29990101T000000Z-pre-migration.sqlite"
+    stray.touch()  # newer by name and mtime, but empty
+
+    assert latest_pre_migration_backup(curator_dir) == good
+    connection.close()
+
+
 def test_latest_backup_is_the_newest_one_not_the_last_alphabetically(tmp_path):
     """Verify same-second backups do not make an older copy look like the newest."""
     curator_dir = build_curator_paths(tmp_path).curator_dir
