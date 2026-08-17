@@ -1,8 +1,8 @@
 """Convert provider outputs into typed harness evidence references."""
 
-import hashlib
-import json
 from datetime import datetime
+
+from curator.core.digest import digest_payload
 
 from curator.core.enums import EvidenceKind, LoopStepType
 from curator.core.schema import (
@@ -36,17 +36,8 @@ def _summary_for_output(output: RoleOutput) -> str:
 
 
 def content_digest(output: RoleOutput) -> str:
-    """Return a sha256 over the provider output this evidence refers to.
-
-    The canonical form is sorted-key, separator-tight JSON so the digest depends on the
-    output's data and not on field declaration order — reordering a model field must never
-    silently change the hash of evidence already on the ledger. Anything that later stores
-    these bytes in a content-addressed store has to hash them exactly this way.
-    """
-    canonical = json.dumps(
-        output.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
-    )
-    return f"sha256:{hashlib.sha256(canonical.encode('utf-8')).hexdigest()}"
+    """Return the content hash of the provider output this evidence refers to."""
+    return digest_payload(output.model_dump(mode="json"))
 
 
 def build_evidence_ref(
