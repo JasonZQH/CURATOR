@@ -589,6 +589,31 @@ def test_reset_hard_removes_entire_state_directory(tmp_path, monkeypatch):
     assert not (tmp_path / ".curator").exists()
 
 
+def test_reset_refuses_while_another_curator_holds_the_project(tmp_path, monkeypatch):
+    """Verify reset refuses rather than archiving the ledger a live loop is writing to.
+
+    reset took no lock at all, so a second terminal could move curator.sqlite out from
+    under an engine that had it open.
+    """
+    import fcntl
+
+    runner = CliRunner()
+    monkeypatch.chdir(tmp_path)
+    runner.invoke(app, ["init", "--yes"])
+
+    handle = (tmp_path / ".curator" / "runtime.lock").open("a+")
+    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    try:
+        result = runner.invoke(app, ["reset", "--hard", "--yes"])
+    finally:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        handle.close()
+
+    assert result.exit_code == 1
+    assert "another terminal" in result.output
+    assert (tmp_path / ".curator").exists()
+
+
 def test_provider_add_rejects_fake_provider(tmp_path, monkeypatch):
     """Verify `curator provider add fake` is rejected."""
     runner = CliRunner()

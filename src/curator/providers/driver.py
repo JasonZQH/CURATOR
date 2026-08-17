@@ -138,6 +138,18 @@ class SubprocessDriver:
         """Map one JSONL output line to a provider event, or drop it."""
         raise NotImplementedError
 
+    def parse_events(
+        self, line: str, provider_run_id: str, sequence: int
+    ) -> list[ProviderEvent]:
+        """Map one JSONL output line to every event it carries.
+
+        Most lines carry at most one event, so the default defers to ``parse_event``.
+        An adapter whose format can pack several tool calls into a single line overrides
+        this instead, or the extra calls are never seen.
+        """
+        event = self.parse_event(line, provider_run_id, sequence)
+        return [] if event is None else [event]
+
     def build_response(
         self,
         spec: HarnessRunSpec,
@@ -214,14 +226,12 @@ class SubprocessDriver:
                 if not line:
                     break
                 sequence += 1
-                event = self.parse_event(
+                for event in self.parse_events(
                     line.decode("utf-8", errors="replace"), spec.id, sequence
-                )
-                if event is None:
-                    continue
-                events.append(event)
-                if on_event is not None:
-                    on_event(event)
+                ):
+                    events.append(event)
+                    if on_event is not None:
+                        on_event(event)
 
         async def _read_stderr() -> bytes:
             """Read all provider stderr bytes after startup."""

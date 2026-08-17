@@ -1,5 +1,7 @@
 """Provide the Typer command-line adapter for Curator startup."""
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import typer
@@ -25,6 +27,7 @@ from curator.rendering.terminal import (
     render_status_report,
 )
 from curator.providers.setup import add_provider_profile, resolve_provider_name
+from curator.runtime.lockfile import ProjectLockedError, project_write_lock
 from curator.shell.repl import run_interactive_shell
 from curator.shell.wizard import run_setup_wizard
 from curator.state.db import connect_database, initialize_database
@@ -54,9 +57,28 @@ def _version_callback(show_version: bool) -> None:
         raise typer.Exit()
 
 
+@contextmanager
+def _project_lock(root: Path) -> Iterator[None]:
+    """Serialize one CLI mutation against a running loop, refusing rather than racing.
+
+    Without this a second terminal can archive the ledger, rewrite provider bindings, or
+    recreate state files underneath a loop that is mid-run and holds an open connection.
+    """
+    try:
+        with project_write_lock(root):
+            yield
+    except ProjectLockedError:
+        typer.echo(
+            "Curator is running in this project from another terminal. "
+            "Wait for it to finish (or stop it) and try again."
+        )
+        raise typer.Exit(1) from None
+
+
 def _echo_init_write_summary(root: Path) -> None:
     """Print the approved init write summary for a project root."""
-    result = write_init_state(root)
+    with _project_lock(root):
+        result = write_init_state(root)
     _echo_init_summary(result.created_files_count, result.skipped_files_count)
 
 
@@ -186,7 +208,8 @@ def reset_command(
             typer.echo("No changes made.")
             return
 
-    summary = reset_curator_state(root, hard=hard)
+    with _project_lock(root):
+        summary = reset_curator_state(root, hard=hard)
     typer.echo(render_reset_summary(summary, applied=True))
 
 
@@ -217,7 +240,8 @@ def contract_validate_command() -> None:
 @app.command("setup")
 def setup_command() -> None:
     """Run the guided setup wizard: roles, providers, login, one consent."""
-    outcome = run_setup_wizard(Path.cwd())
+    with _project_lock(Path.cwd()):
+        outcome = run_setup_wizard(Path.cwd())
     typer.echo(outcome.message)
     if not outcome.applied:
         raise typer.Exit(1)
@@ -238,12 +262,13 @@ def provider_add_command(
             "(or `curator setup` for guided setup)."
         )
         raise typer.Exit(1)
-    connection = connect_database(paths.database)
-    try:
-        migration = initialize_database(connection)
-        result = add_provider_profile(connection, name)
-    finally:
-        connection.close()
+    with _project_lock(Path.cwd()):
+        connection = connect_database(paths.database)
+        try:
+            migration = initialize_database(connection)
+            result = add_provider_profile(connection, name)
+        finally:
+            connection.close()
     _echo_migration(migration)
     typer.echo(result.message)
     if not result.created:

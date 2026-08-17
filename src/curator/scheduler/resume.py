@@ -10,12 +10,14 @@ import sqlite3
 from datetime import UTC, datetime
 
 from curator.core.enums import LoopStatus, LoopStepType, PauseStatus, TaskStatus
+from curator.core.paths import build_curator_paths
 from curator.core.schema import GoalContract, MemoryEntryRecord, PauseRecord
 from curator.harness.workspace import stash_workspace
 from curator.providers.base import Provider
 from curator.providers.events import ProviderEventCallback
 from curator.providers.driver import driver_for_provider
 from curator.scheduler.engine import (
+    RETRY_TARGET_METADATA_KEY,
     DriverResolver,
     LoopExecutionContext,
     LoopExecutionState,
@@ -32,6 +34,7 @@ from curator.state.repositories import (
     load_evidence_refs_for_run,
     load_goal_revision,
     load_goal_run_for_loop,
+    load_loop_decisions_for_run,
     load_loop_iterations_for_run,
     load_loop_run,
     load_pause_records_for_run,
@@ -39,6 +42,7 @@ from curator.state.repositories import (
     load_tasks_for_session,
 )
 from curator.state.transaction import transaction
+from curator.team.roles import load_role_contracts
 
 _AFFIRMATIVE = {"yes", "y", "confirm", "confirmed", "lgtm", "approve", "approved", "ship it"}
 _STASH_INTENT = {"stash", "stash & continue", "stash and continue"}
@@ -83,6 +87,26 @@ def _writer_onward(plan_steps: list) -> list:
         if step.slot == "writer" or step.step_type is LoopStepType.IMPLEMENT:
             return list(plan_steps[index:])
     return list(plan_steps)
+
+
+def _retry_state_from_ledger(
+    connection: sqlite3.Connection, loop_run_id: str
+) -> tuple[dict[str, int], set[str]]:
+    """Rebuild the retry budget already spent by this loop from its decisions.
+
+    The counters live in memory for the length of one execute call, so without this a
+    resumed loop hands a step that already burned its whole budget a fresh one, and
+    ``is_retry_attempt`` reads False so the failure evidence stops being injected. Each
+    scheduled retry stamps its target on the decision, so the spent budget is a fold of
+    the ledger. A ledger written before that stamp existed simply folds to zero, which is
+    the behaviour it had anyway.
+    """
+    counts: dict[str, int] = {}
+    for decision in load_loop_decisions_for_run(connection, loop_run_id):
+        task_id = decision.metadata.get(RETRY_TARGET_METADATA_KEY)
+        if isinstance(task_id, str) and task_id:
+            counts[task_id] = counts.get(task_id, 0) + 1
+    return counts, set(counts)
 
 
 def _record_resume_guidance(
@@ -175,10 +199,13 @@ async def resume_workflow(
     if stash_resume:
         stash_workspace(session.project_root)
 
+    retry_counts, retry_task_ids = _retry_state_from_ledger(connection, loop_run_id)
     state = LoopExecutionState(
         pending_steps=_writer_onward(plan.steps),
         evidence_refs=list(load_evidence_refs_for_run(connection, loop_run_id)),
         run_sequence=len(load_loop_iterations_for_run(connection, loop_run_id)),
+        retry_counts=retry_counts,
+        retry_task_ids=retry_task_ids,
         workspace_owned=bool(pause.metadata.get("workspace_owned")),
     )
     ctx = LoopExecutionContext(
@@ -191,7 +218,11 @@ async def resume_workflow(
         tasks_by_id={
             task.id: task for task in load_tasks_for_session(connection, session.id)
         },
-        role_contracts=None,
+        # The user's edited .curator/team contracts, same as a fresh start loads them.
+        # Passing None here silently ran the resumed half of a loop on the built-ins.
+        role_contracts=load_role_contracts(
+            build_curator_paths(session.project_root)
+        ).contracts,
         goal_contract=_goal_contract_for_loop(connection, loop_run_id),
         created_at=created_at,
         driver_resolver=driver_resolver,

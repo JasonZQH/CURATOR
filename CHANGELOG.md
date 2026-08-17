@@ -4,6 +4,36 @@ All notable changes to Curator are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **Every evidence kind now carries a real digest.** Ordinary provider output was recorded
+  with `content_hash` set to `sha256:<run id>:<kind>` — a string shaped like a digest that
+  hashed nothing — and review evidence, the kind the shipped CLI seats actually produce,
+  carried no hash at all. Both are now a SHA-256 over the content the reference describes,
+  in a canonical sorted-key JSON form that reproduces outside Curator. The four producers
+  share one definition of that form, so a content-addressed store can rely on it.
+- **Resume no longer hands an exhausted step a fresh retry budget.** The retry counters
+  lived only in memory, so resuming a paused loop reset them: a step that had already spent
+  its budget could be retried again, and because the loop no longer considered it a retry
+  attempt, the failing validation evidence stopped being injected into its next context.
+  Each scheduled retry now records its target on the decision, and resume rebuilds the
+  spent budget by folding those rows.
+- **Resume runs under the project's own role contracts.** It passed none, so the resumed
+  half of a loop silently fell back to the built-in contracts while the first half ran on
+  the edited `.curator/team` files.
+- **Parallel Claude tool calls are no longer dropped.** Claude batches several `tool_use`
+  blocks into one assistant message; only the first was read, so the activity block
+  undercounted calls and the files touched by the rest were never shown.
+- **The ledger records what a tool actually did.** The tool-call detail — the command run
+  or the file touched — was dropped on the way to the ledger, so "who changed which files"
+  was visible live and unanswerable afterwards from the durable record. It is redacted
+  before it is stored.
+- **`curator init`, `setup`, `provider add`, and `reset` take the project write lock.**
+  They took no lock at all, so a second terminal could archive the ledger or rewrite
+  provider bindings underneath a loop that was mid-run with the database open. They now
+  refuse with a clear message instead of racing.
+
 ## [0.1.2] — 2026-07-28
 
 ### Added

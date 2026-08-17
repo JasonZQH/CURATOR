@@ -62,6 +62,10 @@ def reset_curator_state(
     if hard:
         removed = []
         if paths.curator_dir.exists():
+            # Callers hold the project write lock across this, so no live loop can be
+            # holding runtime.lock while it is unlinked — an fcntl lock lives on the inode,
+            # so removing the file under a holder would let the next caller lock a fresh
+            # inode and give one project two owners.
             shutil.rmtree(paths.curator_dir)
             removed.append(paths.curator_dir)
         return ResetSummary(hard=True, removed_paths=removed)

@@ -62,6 +62,31 @@ def test_claude_tool_use_event_carries_the_input(tmp_path):
     assert "ruff check src" in event.payload["detail"]
 
 
+def test_claude_parallel_tool_uses_each_become_an_event(tmp_path):
+    """Verify every tool_use block in one assistant message is reported, not just the first.
+
+    Claude batches parallel tool calls into a single message. Reading only the first one
+    undercounted the calls and hid the files the other calls touched.
+    """
+    driver = ClaudeCodeDriver(tmp_path)
+    line = (
+        '{"type": "assistant", "message": {"content": ['
+        '{"type": "tool_use", "name": "Edit", "input": {"file_path": "src/a.py"}}, '
+        '{"type": "tool_use", "name": "Edit", "input": {"file_path": "src/b.py"}}, '
+        '{"type": "tool_use", "name": "Bash", "input": {"command": "pytest -q"}}]}}'
+    )
+
+    events = driver.parse_events(line, "harness-001", 1)
+
+    assert [event.label for event in events] == ["Edit", "Edit", "Bash"]
+    assert [event.payload["detail"] for event in events] == [
+        "src/a.py",
+        "src/b.py",
+        "pytest -q",
+    ]
+    assert all(event.kind is ProviderEventKind.TOOL_CALL for event in events)
+
+
 def test_codex_turn_completed_reports_tokens_and_provider(tmp_path):
     """Verify a Codex turn.completed event carries the provider and its token total."""
     driver = CodexCliDriver(tmp_path)

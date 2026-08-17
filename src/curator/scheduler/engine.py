@@ -211,6 +211,11 @@ def _ledger_event_payload(
     each chunk is redacted (and head-capped) in isolation.
     """
     payload = {"kind": event.kind.value, "label": event.label}
+    detail = event.payload.get("detail")
+    if isinstance(detail, str) and detail:
+        # The command a tool ran or the file it touched. Adapters already redact this, but
+        # the ledger is durable — scrub again rather than trust every future adapter.
+        payload["detail"] = redact_secrets(detail)[:OUTPUT_CHUNK_MAX_CHARS]
     if event.kind is ProviderEventKind.OUTPUT_CHUNK:
         raw = str(event.payload.get("text", ""))
         text = redactor.scrub(raw) if redactor is not None else redact_secrets(raw)
@@ -343,6 +348,22 @@ def _retry_target_step(
                 return candidate
 
     return _retry_implementation_step(plan)
+
+
+RETRY_TARGET_METADATA_KEY = "retry_target_task_id"
+
+
+def _retry_metadata(retry_step: CompiledLoopStep | None) -> dict:
+    """Return the decision metadata that records which step a retry re-runs.
+
+    The retry budget itself lives only in ``LoopExecutionState`` for the length of one
+    execute call, so a resumed loop cannot see how much of it was already spent. Stamping
+    the retry target on the decision makes the budget a fold of the ledger instead: resume
+    counts these rows rather than starting every step over with a fresh allowance.
+    """
+    if retry_step is None:
+        return {}
+    return {RETRY_TARGET_METADATA_KEY: retry_step.task_id}
 
 
 def _max_retries_for_step(step: CompiledLoopStep) -> int:
@@ -814,6 +835,7 @@ def _execute_verifier_step(
         stop_condition=runtime_decision.stop_condition,
         reason=runtime_decision.reason,
         created_at=completed_at,
+        metadata=_retry_metadata(retry_step),
     )
     insert_loop_iteration(connection, iteration)
     insert_loop_decision(connection, decision)
@@ -1013,7 +1035,11 @@ async def _execute_provider_step(
         stop_condition=runtime_decision.stop_condition,
         reason=runtime_decision.reason,
         created_at=step_completed_at,
-        metadata={**provider_stop_metadata, **pause_overrides},
+        metadata={
+            **provider_stop_metadata,
+            **pause_overrides,
+            **_retry_metadata(retry_step),
+        },
     )
 
     insert_loop_iteration(connection, iteration)

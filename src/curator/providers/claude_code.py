@@ -56,32 +56,47 @@ class ClaudeCodeDriver(SubprocessDriver):
     def parse_event(
         self, line: str, provider_run_id: str, sequence: int
     ) -> ProviderEvent | None:
-        """Map one Claude Code stream-json line to a provider event."""
+        """Map one Claude Code stream-json line to its first provider event."""
+        events = self.parse_events(line, provider_run_id, sequence)
+        return events[0] if events else None
+
+    def parse_events(
+        self, line: str, provider_run_id: str, sequence: int
+    ) -> list[ProviderEvent]:
+        """Map one Claude Code stream-json line to every provider event it carries.
+
+        Claude routinely emits several ``tool_use`` blocks in one assistant message when it
+        runs tools in parallel; each one is a real call and gets its own event.
+        """
         payload = self.parse_json_line(line)
         if payload is None:
-            return None
+            return []
 
         message_type = payload.get("type")
         if message_type == "assistant":
             text = _assistant_text(payload)
             if text:
                 self._final_text[provider_run_id] = text
-            tool = _tool_use(payload)
-            if tool is not None:
-                name, detail = tool
-                return ProviderEvent(
-                    kind=ProviderEventKind.TOOL_CALL,
+            tools = _tool_uses(payload)
+            if tools:
+                return [
+                    ProviderEvent(
+                        kind=ProviderEventKind.TOOL_CALL,
+                        provider_run_id=provider_run_id,
+                        sequence=sequence,
+                        label=name,
+                        payload={"type": message_type, "detail": detail},
+                    )
+                    for name, detail in tools
+                ]
+            return [
+                ProviderEvent(
+                    kind=ProviderEventKind.OUTPUT_CHUNK,
                     provider_run_id=provider_run_id,
                     sequence=sequence,
-                    label=name,
-                    payload={"type": message_type, "detail": detail},
+                    payload={"type": message_type, "text": text[:OUTPUT_CHUNK_MAX_CHARS]},
                 )
-            return ProviderEvent(
-                kind=ProviderEventKind.OUTPUT_CHUNK,
-                provider_run_id=provider_run_id,
-                sequence=sequence,
-                payload={"type": message_type, "text": text[:OUTPUT_CHUNK_MAX_CHARS]},
-            )
+            ]
         if message_type == "result":
             result_text = payload.get("result")
             if isinstance(result_text, str) and result_text:
@@ -93,13 +108,15 @@ class ClaudeCodeDriver(SubprocessDriver):
             tokens = usage_tokens(payload)
             if tokens is not None:
                 usage_payload["tokens"] = tokens
-            return ProviderEvent(
-                kind=ProviderEventKind.USAGE,
-                provider_run_id=provider_run_id,
-                sequence=sequence,
-                payload=usage_payload,
-            )
-        return None
+            return [
+                ProviderEvent(
+                    kind=ProviderEventKind.USAGE,
+                    provider_run_id=provider_run_id,
+                    sequence=sequence,
+                    payload=usage_payload,
+                )
+            ]
+        return []
 
     def build_response(
         self,
@@ -149,19 +166,21 @@ def _assistant_text(payload: dict) -> str:
     return " ".join(text for text in texts if text).strip()
 
 
-def _tool_use(payload: dict) -> tuple[str, str] | None:
-    """Return the (name, detail) of the first tool used in an assistant message, if any.
+def _tool_uses(payload: dict) -> list[tuple[str, str]]:
+    """Return the (name, detail) of every tool used in one assistant message.
 
     The detail is a short, redacted summary of the tool input — the command it ran or the
     file it touched — so the transcript shows what happened, not just the tool name.
+    Claude packs parallel tool calls into a single message, so reading only the first one
+    both undercounts the calls and hides the edits the others made.
     """
     message = payload.get("message", {})
     blocks = message.get("content", []) if isinstance(message, dict) else []
-    for block in blocks:
-        if isinstance(block, dict) and block.get("type") == "tool_use":
-            name = str(block.get("name", "tool"))
-            return name, _tool_input_detail(block.get("input"))
-    return None
+    return [
+        (str(block.get("name", "tool")), _tool_input_detail(block.get("input")))
+        for block in blocks
+        if isinstance(block, dict) and block.get("type") == "tool_use"
+    ]
 
 
 def _tool_input_detail(tool_input: object) -> str:

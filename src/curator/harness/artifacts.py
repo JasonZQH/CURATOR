@@ -2,6 +2,8 @@
 
 from datetime import datetime
 
+from curator.core.digest import digest_payload
+
 from curator.core.enums import EvidenceKind, LoopStepType
 from curator.core.schema import (
     EngineerImplementationOutput,
@@ -33,6 +35,11 @@ def _summary_for_output(output: RoleOutput) -> str:
     return output.summary
 
 
+def content_digest(output: RoleOutput) -> str:
+    """Return the content hash of the provider output this evidence refers to."""
+    return digest_payload(output.model_dump(mode="json"))
+
+
 def build_evidence_ref(
     spec: HarnessRunSpec,
     output: RoleOutput,
@@ -50,7 +57,7 @@ def build_evidence_ref(
         summary=_summary_for_output(output),
         producer_role=spec.role,
         created_at=created_at,
-        content_hash=f"sha256:{spec.id}:{evidence_kind.value}",
+        content_hash=content_digest(output),
     )
 
 
