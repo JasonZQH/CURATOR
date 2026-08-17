@@ -98,6 +98,40 @@ def test_build_evidence_ref_maps_role_outputs_to_evidence_kinds():
     assert evidence.producer_role is RoleName.QA
 
 
+def test_evidence_content_hash_digests_the_output_not_the_spec_id():
+    """Verify the evidence hash is a real digest of the output it points at.
+
+    It used to be f"sha256:{spec.id}:{kind}" — a string shaped like a digest that hashed
+    nothing, so two different outputs from one step were indistinguishable and the hash
+    could not be checked against anything.
+    """
+    import hashlib
+    import json
+
+    now = datetime(2026, 6, 25, 11, 30, tzinfo=UTC)
+    spec = HarnessRunSpec(
+        id="harness-qa",
+        session_id="session-001",
+        loop_run_id="loop-run-001",
+        iteration_id="iteration-qa",
+        role=RoleName.QA,
+        step_type=LoopStepType.VALIDATE,
+        task_id="task-qa",
+    )
+    passed = QAValidationOutput(passed=True, summary="QA passed.", checks=["tests"])
+    failed = QAValidationOutput(passed=False, summary="QA failed.", checks=["tests"])
+
+    first = build_evidence_ref(spec, passed, now)
+    second = build_evidence_ref(spec, failed, now)
+
+    assert first.content_hash != second.content_hash
+    assert build_evidence_ref(spec, passed, now).content_hash == first.content_hash
+
+    # Reproducible outside Curator: the digest is over sorted-key, tight-separator JSON.
+    canonical = json.dumps(passed.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+    assert first.content_hash == f"sha256:{hashlib.sha256(canonical.encode()).hexdigest()}"
+
+
 def test_harness_runtime_returns_structured_result_without_repo_writes(tmp_path, monkeypatch):
     """Verify harness execution returns evidence and does not write project files."""
     monkeypatch.chdir(tmp_path)

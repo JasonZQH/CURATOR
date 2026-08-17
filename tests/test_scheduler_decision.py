@@ -244,6 +244,45 @@ def test_ledger_event_payload_redacts_secrets_in_output_chunks():
     assert "[REDACTED]" in payload["text"]
 
 
+def test_ledger_event_payload_keeps_the_tool_call_detail():
+    """Verify the ledger records which file a tool touched, not just the tool name.
+
+    The detail was dropped on the way to the ledger, so "who changed which files" was
+    visible live in the TUI and unanswerable afterwards from the durable record.
+    """
+    from curator.providers.events import ProviderEvent, ProviderEventKind
+    from curator.scheduler.engine import _ledger_event_payload
+
+    event = ProviderEvent(
+        kind=ProviderEventKind.TOOL_CALL,
+        provider_run_id="provider-1",
+        label="Edit",
+        payload={"detail": "src/curator/app.py"},
+    )
+
+    payload = _ledger_event_payload(event)
+
+    assert payload["label"] == "Edit"
+    assert payload["detail"] == "src/curator/app.py"
+
+
+def test_ledger_event_payload_redacts_a_secret_in_the_tool_detail():
+    """Verify a credential passed on a tool command line never lands in the ledger."""
+    from curator.providers.events import ProviderEvent, ProviderEventKind
+    from curator.scheduler.engine import _ledger_event_payload
+
+    event = ProviderEvent(
+        kind=ProviderEventKind.TOOL_CALL,
+        provider_run_id="provider-1",
+        label="Bash",
+        payload={"detail": "deploy --token=sk-abcdef0123456789abcdef"},
+    )
+
+    payload = _ledger_event_payload(event)
+
+    assert "sk-abcdef0123456789abcdef" not in payload["detail"]
+
+
 def test_ledger_event_payload_redacts_secret_split_across_chunks():
     """Verify a secret straddling two OUTPUT_CHUNK events never lands in the ledger cleartext."""
     from curator.providers.events import ProviderEvent, ProviderEventKind

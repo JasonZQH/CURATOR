@@ -374,6 +374,37 @@ def test_run_workflow_pauses_after_repeated_validation_failure(tmp_path):
     )
 
 
+def test_scheduled_retries_are_recorded_on_the_decision(tmp_path):
+    """Verify each scheduled retry names its target task on the durable decision.
+
+    The retry budget lives in memory for one execute call, so resume had no way to see
+    how much of it was already spent and handed an exhausted step a fresh allowance.
+    Stamping the target here makes the spent budget a fold of the ledger.
+    """
+    from curator.scheduler.engine import RETRY_TARGET_METADATA_KEY
+    from curator.scheduler.resume import _retry_state_from_ledger
+
+    now = datetime(2026, 6, 25, 14, 45, tzinfo=UTC)
+    connection = connect_database(tmp_path / ".curator" / "curator.sqlite")
+    initialize_database(connection)
+    session_id = create_workflow_session(connection, tmp_path, created_at=now)
+
+    run_workflow(connection, session_id, AlwaysFailValidationProvider(), created_at=now)
+    loop_run = load_loop_runs_for_session(connection, session_id)[0]
+    decisions = load_loop_decisions_for_run(connection, loop_run.id)
+
+    retry_targets = [
+        decision.metadata[RETRY_TARGET_METADATA_KEY]
+        for decision in decisions
+        if RETRY_TARGET_METADATA_KEY in decision.metadata
+    ]
+    assert retry_targets, "a scheduled retry must record which task it re-runs"
+
+    counts, task_ids = _retry_state_from_ledger(connection, loop_run.id)
+    assert counts[retry_targets[0]] == len(retry_targets)
+    assert task_ids == set(retry_targets)
+
+
 def test_run_workflow_stops_failed_when_provider_raises(tmp_path):
     """Verify scheduler persists provider failure decisions instead of raising."""
     now = datetime(2026, 6, 25, 14, 50, tzinfo=UTC)

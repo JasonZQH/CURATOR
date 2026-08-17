@@ -120,6 +120,43 @@ def test_confirm_gate_resume_completes_loop(tmp_path, monkeypatch):
     assert any(task.role is RoleName.PM and task.status is TaskStatus.DONE for task in tasks)
 
 
+def test_resume_runs_under_the_projects_edited_contracts(tmp_path, monkeypatch):
+    """Verify a resumed loop uses the same role contracts a fresh start would load.
+
+    Resume passed role_contracts=None, so the resumed half of a loop silently fell back to
+    the built-in contracts while the first half ran on the user's edited .curator/team
+    files. Today only contract-routed steps read them, so this pins the invariant rather
+    than an observable behaviour change — the divergence becomes live the moment a step
+    routes by contract.
+    """
+    from curator.team.roles import load_role_contracts
+
+    _write_passing_pytest_project(tmp_path)
+    revision_id = _accepted_revision(tmp_path)
+    _bind_live_providers(tmp_path)
+
+    snapshot = start_goal_loop(tmp_path, revision_id, provider=CodingDeliveryFakeProvider())
+    loop_run = snapshot.loop_runs[-1]
+    assert loop_run.status is LoopStatus.PAUSED
+
+    captured = {}
+
+    async def _capture_run_steps(ctx, state):
+        """Record the execution context instead of running the remaining steps."""
+        captured["role_contracts"] = ctx.role_contracts
+
+    monkeypatch.setattr("curator.scheduler.resume._run_steps", _capture_run_steps)
+
+    connection = connect_database(build_curator_paths(tmp_path).database)
+    initialize_database(connection)
+    resume_workflow_sync(connection, loop_run.id, "also handle the empty case")
+    connection.close()
+
+    expected = load_role_contracts(build_curator_paths(tmp_path)).contracts
+    assert captured["role_contracts"] == expected
+    assert captured["role_contracts"] is not None
+
+
 def test_resume_refuses_when_no_open_pause(tmp_path):
     """Verify resume returns False when there is no open pause to continue."""
     from curator.scheduler.engine import create_workflow_session
