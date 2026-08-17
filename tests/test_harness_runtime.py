@@ -98,6 +98,44 @@ def test_build_evidence_ref_maps_role_outputs_to_evidence_kinds():
     assert evidence.producer_role is RoleName.QA
 
 
+def test_every_cli_evidence_kind_carries_a_real_digest(tmp_path):
+    """Verify no evidence kind reaches the ledger unhashed on the real CLI path.
+
+    Found by an end-to-end run, not by a unit test: the reviewer's evidence is built by
+    build_cli_provider_response, a fourth producer that set no content_hash at all — so
+    "every conclusion traces to a hash" was false for review evidence on the seat that
+    actually ships.
+    """
+    from curator.core.digest import digest_payload
+    from curator.providers.cli_common import build_cli_provider_response
+
+    spec = HarnessRunSpec(
+        id="harness-review",
+        session_id="session-001",
+        loop_run_id="loop-run-001",
+        iteration_id="iteration-review",
+        role=RoleName.QA,
+        step_type=LoopStepType.REVIEW,
+        task_id="task-review",
+    )
+    response = build_cli_provider_response(
+        spec,
+        ProviderRunRequest.from_harness_spec(spec),
+        provider=ProviderName.CLAUDE_CODE,
+        slot="reviewer",
+        final_text="Review passed; no blocking findings.",
+        baseline=None,
+        project_root=tmp_path,
+    )
+
+    evidence = response.evidence_refs[0]
+    assert evidence.kind is EvidenceKind.REVIEW
+    assert evidence.content_hash == digest_payload(
+        {"summary": "Review passed; no blocking findings.", "slot": "reviewer"}
+    )
+    assert len(evidence.content_hash.split(":")[1]) == 64
+
+
 def test_evidence_content_hash_digests_the_output_not_the_spec_id():
     """Verify the evidence hash is a real digest of the output it points at.
 

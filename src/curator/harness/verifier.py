@@ -1,6 +1,5 @@
 """Run deterministic verification commands and produce real evidence."""
 
-import hashlib
 import json
 import subprocess
 import sys
@@ -9,6 +8,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+from curator.core.digest import digest_bytes
 from curator.core.enums import EvidenceKind, RoleName
 from curator.core.schema import EvidenceRef
 
@@ -170,7 +170,6 @@ def build_validation_evidence(
     report_dir.mkdir(parents=True, exist_ok=True)
     report_path = report_dir / "verification.json"
     report_path.write_bytes(report_bytes)
-    digest = hashlib.sha256(report_bytes).hexdigest()
 
     return EvidenceRef(
         id=f"evidence-verify-{iteration_id}",
@@ -182,7 +181,7 @@ def build_validation_evidence(
         summary=_verification_summary(result),
         producer_role=RoleName.QA,
         created_at=created_at,
-        content_hash=f"sha256:{digest}",
+        content_hash=digest_bytes(report_bytes),
         metadata={
             "passed": result.passed,
             "command_count": len(result.results),

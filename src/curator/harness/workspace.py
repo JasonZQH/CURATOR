@@ -5,10 +5,11 @@ changed by diffing the git working tree against a clean baseline captured
 before dispatch.
 """
 
-import hashlib
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from curator.core.digest import digest_bytes
 
 
 @dataclass(frozen=True)
@@ -188,11 +189,10 @@ def capture_workspace_evidence(
     artifact_dir.mkdir(parents=True, exist_ok=True)
     diff_path = artifact_dir / "implementation.diff"
     diff_path.write_bytes(diff_bytes)
-    digest = hashlib.sha256(diff_bytes).hexdigest()
 
     return WorkspaceEvidence(
         changed_files=changed,
         diff_text=diff_text,
-        content_hash=f"sha256:{digest}",
+        content_hash=digest_bytes(diff_bytes),
         diff_path=diff_path,
     )

@@ -3,6 +3,7 @@
 from datetime import UTC, datetime
 from pathlib import Path
 
+from curator.core.digest import digest_payload
 from curator.core.enums import EvidenceKind, ProviderName, ProviderRunStatus
 from curator.core.schema import EvidenceRef, HarnessRunSpec
 from curator.harness.workspace import WorkspaceBaseline, capture_workspace_evidence
@@ -61,6 +62,9 @@ def build_cli_provider_response(
             summary=summary,
             producer_role=spec.role,
             created_at=now,
+            # A review is the reviewer's own words; without a digest it is the one evidence
+            # kind on the shipped CLI path that could not be checked against anything.
+            content_hash=digest_payload({"summary": summary, "slot": REVIEWER_SLOT}),
         )
         return ProviderRunResponse(
             provider=provider,
