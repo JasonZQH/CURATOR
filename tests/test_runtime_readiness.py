@@ -481,6 +481,36 @@ def test_action_policy_blocks_out_of_scope_and_destructive_actions(tmp_path):
     assert github_write.reason == "Remote VCS write actions require user approval."
 
 
+def test_action_policy_denies_curator_state_inside_the_writable_root(tmp_path):
+    """Verify the governance carve-out beats the containment test that surrounds it.
+
+    `.curator` holds the role contracts, the loop templates, and the ledger, and it sits
+    inside the project root the policy makes writable — so a plain containment check
+    reported writing it as permitted.
+    """
+    policy = ActionPolicy.for_project(tmp_path)
+
+    contract_write = policy.evaluate(
+        ActionRequest(
+            type=ActionType.WRITE_FILE,
+            target=str(tmp_path / ".curator" / "team" / "roles" / "engineer" / "contract.yaml"),
+        )
+    )
+    ledger_write = policy.evaluate(
+        ActionRequest(
+            type=ActionType.WRITE_FILE, target=str(tmp_path / ".curator" / "curator.sqlite")
+        )
+    )
+    ordinary_write = policy.evaluate(
+        ActionRequest(type=ActionType.WRITE_FILE, target=str(tmp_path / "src" / "app.py"))
+    )
+
+    assert contract_write.allowed is False
+    assert contract_write.handoff_required is True
+    assert ledger_write.allowed is False
+    assert ordinary_write.allowed is True
+
+
 def test_provider_failure_matrix_records_typed_invalid_output(tmp_path):
     """Verify invalid provider output pauses with a typed provider ledger error."""
 

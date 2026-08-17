@@ -56,6 +56,11 @@ def _request(spec: HarnessRunSpec) -> ProviderRunRequest:
     return ProviderRunRequest.from_harness_spec(spec)
 
 
+def _allowed_tools(args: list[str]) -> list[str]:
+    """Return the tool specs a permission argv grants."""
+    return args[args.index("--allowedTools") + 1].split(",")
+
+
 def test_claude_permission_args_differ_by_slot(tmp_path):
     """Verify writer slots can edit while reviewer slots stay read-only."""
     policy = ActionPolicy.for_project(tmp_path)
@@ -63,15 +68,58 @@ def test_claude_permission_args_differ_by_slot(tmp_path):
     reviewer = claude_permission_args(policy, "reviewer")
 
     assert "acceptEdits" in writer
-    assert "Write" in " ".join(writer)
+    assert "Write" in _allowed_tools(writer)
     assert "plan" in reviewer
-    assert "Write" not in " ".join(reviewer)
+    assert "Write" not in _allowed_tools(reviewer)
+
+
+def test_claude_permission_args_deny_an_unknown_slot(tmp_path):
+    """Verify a slot that is not the writer gets read-only, whatever it is called.
+
+    The check used to name the read-only slots, so anything unrecognised — a typo, a slot
+    added later, or the None a step compiles with when it declares no slot — fell through
+    to the workspace-write branch. The permissive branch must not be the default.
+    """
+    policy = ActionPolicy.for_project(tmp_path)
+
+    for slot in (None, "", "Writer", "reviewer", "security-auditor"):
+        args = claude_permission_args(policy, slot)
+        assert "plan" in args, slot
+        assert "acceptEdits" not in args, slot
+        assert "Write" not in _allowed_tools(args), slot
+        assert codex_sandbox_args(policy, slot).count("read-only") == 1, slot
+
+
+def test_claude_permission_args_deny_curator_state(tmp_path):
+    """Verify no seat is allowed to touch Curator's own state through the Claude CLI."""
+    policy = ActionPolicy.for_project(tmp_path)
+
+    for slot in ("writer", "reviewer", None):
+        args = claude_permission_args(policy, slot)
+        denied = args[args.index("--disallowedTools") + 1].split(",")
+        assert "Write(.curator/**)" in denied, slot
+        assert "Edit(.curator/**)" in denied, slot
+
+
+def test_claude_writer_cannot_run_arbitrary_git_subcommands(tmp_path):
+    """Verify the writer gets named git verbs, not the whole command.
+
+    `Bash(git *)` also granted `git config`, `git checkout`, and `git worktree` — enough to
+    rewrite the branch base workspace isolation depends on — and left the `git push*`
+    denial resting on prefix matching alone.
+    """
+    policy = ActionPolicy.for_project(tmp_path)
+    allowed = _allowed_tools(claude_permission_args(policy, "writer"))
+
+    assert "Bash(git *)" not in allowed
+    assert "Bash(git status*)" in allowed
+    assert not any(spec.startswith("Bash(git config") for spec in allowed)
 
 
 def test_claude_tool_lists_are_comma_separated_single_args(tmp_path):
     """Verify tool specs with spaces stay intact as one comma-separated argv value.
 
-    Claude's --allowedTools splits on spaces, so "Bash(git *)" must ride inside a
+    Claude's --allowedTools splits on spaces, so "Bash(git status*)" must ride inside a
     single comma-separated argument, never split across argv elements.
     """
     policy = ActionPolicy.for_project(tmp_path)
@@ -79,10 +127,10 @@ def test_claude_tool_lists_are_comma_separated_single_args(tmp_path):
     tools_value = writer[writer.index("--allowedTools") + 1]
 
     assert "," in tools_value
-    assert "Bash(git *)" in tools_value.split(",")
+    assert "Bash(git status*)" in tools_value.split(",")
     # The spec must never appear as its own broken argv token.
     assert "Bash(git" not in writer
-    assert "*)" not in writer
+    assert "status*)" not in writer
 
 
 def test_codex_sandbox_args_differ_by_slot(tmp_path):

@@ -39,6 +39,11 @@ from curator.core.schema import (
     GoalContract,
 )
 from curator.context.packaging import build_context_package
+from curator.core.paths import build_curator_paths
+from curator.runtime.governance import (
+    detect_governance_change,
+    snapshot_governance,
+)
 from curator.harness.runtime import run_harness_async
 from curator.harness.verifier import (
     VerificationSpec,
@@ -942,6 +947,10 @@ async def _execute_provider_step(
     provider_error = None
     result = None
     provider_identity = None
+    # Hashed around the dispatch, not diffed afterwards: .curator is invisible to git, so a
+    # provider rewriting its own contract would leave nothing for the evidence diff to find.
+    governance_paths = build_curator_paths(ctx.session.project_root)
+    governance_before = snapshot_governance(governance_paths)
     try:
         # Enforce a clean workspace only on the loop's very first writer
         # dispatch. Retries and resumes legitimately build on the writer's own
@@ -997,6 +1006,18 @@ async def _execute_provider_step(
                 stop_condition=StopCondition.HUMAN_HANDOFF_REQUESTED,
                 reason=pause_reason,
             )
+
+    # Checked even when the provider failed: a run that tampered and then crashed still
+    # tampered, and its evidence is no more trustworthy for having ended badly.
+    governance_violation = detect_governance_change(
+        governance_before, snapshot_governance(governance_paths)
+    )
+    if governance_violation is not None:
+        runtime_decision = RuntimeDecision(
+            decision=LoopDecisionType.HUMAN_HANDOFF,
+            stop_condition=StopCondition.HUMAN_HANDOFF_REQUESTED,
+            reason=governance_violation.reason,
+        )
 
     retry_step: CompiledLoopStep | None = None
     if runtime_decision.decision in _RETRY_DECISIONS:
@@ -1073,7 +1094,8 @@ async def _execute_provider_step(
             connection,
             provider_record,
         )
-    if result is not None:
+    # Evidence from a run that edited the rules it was judged by is not evidence.
+    if result is not None and governance_violation is None:
         for evidence in result.evidence_refs:
             insert_evidence_ref(connection, evidence)
             state.evidence_refs.append(evidence)
