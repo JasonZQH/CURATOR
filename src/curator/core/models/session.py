@@ -58,3 +58,6 @@ class EventRecord(CuratorModel):
     created_at: datetime
     task_id: str | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
+    # The event this one followed from. Event causality only — not execution lineage
+    # (Execution.parent_execution_id) and not task dependency (TaskDependency).
+    causation_id: str | None = None

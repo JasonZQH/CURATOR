@@ -12,8 +12,8 @@ def insert_event(connection: sqlite3.Connection, event: EventRecord) -> None:
     connection.execute(
         """
         insert or replace into events (
-            id, session_id, task_id, type, created_at, payload_json
-        ) values (?, ?, ?, ?, ?, ?)
+            id, session_id, task_id, type, created_at, payload_json, causation_id
+        ) values (?, ?, ?, ?, ?, ?, ?)
         """,
         (
             event.id,
@@ -22,13 +22,20 @@ def insert_event(connection: sqlite3.Connection, event: EventRecord) -> None:
             event.type.value,
             event.created_at.isoformat(),
             json_dumps(event.payload),
+            event.causation_id,
         ),
     )
     maybe_commit(connection)
 
 
 def _map_event(row: sqlite3.Row) -> dict[str, Any]:
-    """Map an events row into EventRecord keyword arguments."""
+    """Map an events row into EventRecord keyword arguments.
+
+    causation_id is read defensively: a ledger opened between the schema script and the
+    migration commit still has the old column set, and a bare row["causation_id"] would
+    raise there rather than degrade.
+    """
+    keys = row.keys()
     return {
         "id": row["id"],
         "session_id": row["session_id"],
@@ -36,6 +43,7 @@ def _map_event(row: sqlite3.Row) -> dict[str, Any]:
         "type": row["type"],
         "created_at": row["created_at"],
         "payload": json_loads(row["payload_json"]),
+        "causation_id": row["causation_id"] if "causation_id" in keys else None,
     }
 
 

@@ -44,8 +44,49 @@ create table if not exists events (
     type text not null,
     created_at text not null,
     payload_json text not null default '{}',
+    -- Which event caused this one. Deliberately separate from execution lineage and task
+    -- dependency: replay follows causation, recovery follows lineage, the ready queue
+    -- follows dependency, and one shared parent column would make all three ambiguous.
+    causation_id text,
     foreign key (session_id) references sessions(id),
     foreign key (task_id) references tasks(id)
+);
+
+-- One attempt at one task, immutable once written. A retry is a NEW row pointing at the
+-- one it replaces, so a failed attempt keeps its own identity and the evidence it produced
+-- stays attached to the attempt that produced it.
+create table if not exists executions (
+    id text primary key,
+    session_id text not null,
+    loop_run_id text not null,
+    task_id text not null,
+    iteration_id text,
+    attempt integer not null default 1,
+    -- Execution lineage: retries, dispatch attempts, and later race candidates. NOT the
+    -- business dependency graph and NOT event causality; those are separate on purpose.
+    parent_execution_id text,
+    status text not null,
+    started_at text not null,
+    completed_at text,
+    metadata_json text not null default '{}',
+    foreign key (session_id) references sessions(id),
+    foreign key (loop_run_id) references loop_runs(id),
+    foreign key (parent_execution_id) references executions(id)
+);
+
+-- The business dependency graph: which task must finish before which. The ready queue
+-- reads this and nothing else.
+create table if not exists task_dependencies (
+    id text primary key,
+    session_id text not null,
+    task_id text not null,
+    depends_on_task_id text not null,
+    created_at text not null,
+    metadata_json text not null default '{}',
+    unique (task_id, depends_on_task_id),
+    foreign key (session_id) references sessions(id),
+    foreign key (task_id) references tasks(id),
+    foreign key (depends_on_task_id) references tasks(id)
 );
 
 create table if not exists loop_runs (
@@ -390,6 +431,9 @@ create index if not exists idx_evidence_refs_run on evidence_refs (loop_run_id);
 create index if not exists idx_provider_runs_run on provider_runs (loop_run_id);
 create index if not exists idx_loop_decisions_run on loop_decisions (loop_run_id);
 create index if not exists idx_goal_revisions_goal on goal_revisions (goal_id);
+create index if not exists idx_executions_task on executions (task_id);
+create index if not exists idx_executions_parent on executions (parent_execution_id);
+create index if not exists idx_task_dependencies_task on task_dependencies (task_id);
 """
 
 
