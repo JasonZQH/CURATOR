@@ -7,6 +7,28 @@ All notable changes to Curator are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Every attempt at a task now has its own durable identity.** A retry used to be an
+  in-memory counter over one reused compiled step, so a failed attempt left nothing behind
+  that the evidence it produced could be attributed to. Each attempt is now an `executions`
+  row carrying its attempt number and a link to the attempt it replaces. Both are read off
+  the ledger rather than from memory, so a resumed loop continues the same lineage instead
+  of opening a second one at attempt 1.
+- **A plan's ordering is written down as dependency edges** rather than left implicit in
+  list position, so the ready queue that reads them later reads declared data.
+- **Events record what caused them.** A retried step's start event cites the completion of
+  the attempt it replaces.
+
+  These are three separate relationships and they stay in three separate columns:
+  `task_dependencies` answers which task blocks which, `executions.parent_execution_id`
+  answers which attempt replaced which, and `events.causation_id` answers why something
+  happened. One shared parent pointer would make the ready queue, recovery, and replay
+  ambiguous at the same time.
+- **An upgrade can no longer skip a migration silently.** `phase0_schema_sql()` runs on
+  every open and is all `create table if not exists`, so a new *table* reaches an existing
+  ledger for free while a new *column* only arrives through a numbered migration — a
+  difference CI could never see, because CI always starts from an empty database. A test
+  now upgrades a ledger built from the schema the released v0.1.2 actually produced and
+  compares it column-for-column against a fresh install.
 - **Curator's own state is off limits to a run, and tampering is caught.** `.curator/`
   holds the role contracts, the loop templates, and the ledger, and it sits inside the one
   writable root a provider is given — while being invisible to every diff-based check

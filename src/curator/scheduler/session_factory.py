@@ -11,6 +11,7 @@ from curator.core.schema import (
     LoopRunRecord,
     RoleSelectionRecord,
     SessionRecord,
+    TaskDependencyRecord,
     TaskRecord,
 )
 from curator.scheduler.ids import new_loop_run_id, scoped_task_id
@@ -24,6 +25,7 @@ class WorkflowSessionSkeleton:
     loop_run: LoopRunRecord
     tasks: list[TaskRecord]
     role_selections: list[RoleSelectionRecord]
+    dependencies: list[TaskDependencyRecord]
 
 
 def role_selection_for_step(
@@ -89,6 +91,22 @@ def build_workflow_session_records(
         )
         for step in compiled_plan.steps
     ]
+    # Today's plans are a straight line, so every task depends on the one before it. The
+    # edges are written even though nothing schedules on them yet: they are the real shape
+    # of this plan, and a ready queue that reads declared edges beats one that re-derives
+    # the ordering from list position.
+    dependencies = [
+        TaskDependencyRecord(
+            id=f"{loop_run.id}-dependency-{index:03d}",
+            session_id=session.id,
+            task_id=task.id,
+            depends_on_task_id=tasks[index - 1].id,
+            created_at=created_at,
+            metadata={"source": "compiled_plan_order"},
+        )
+        for index, task in enumerate(tasks)
+        if index > 0
+    ]
     role_selections = [
         selection
         for step in compiled_plan.steps
@@ -100,4 +118,5 @@ def build_workflow_session_records(
         loop_run=loop_run,
         tasks=tasks,
         role_selections=role_selections,
+        dependencies=dependencies,
     )

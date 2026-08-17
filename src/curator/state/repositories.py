@@ -1,6 +1,13 @@
 """Re-export focused state repository helpers for compatibility."""
 
 from curator.state.events import insert_event, load_events_for_session
+from curator.state.executions import (
+    insert_execution,
+    insert_task_dependency,
+    load_executions_for_run,
+    load_executions_for_task,
+    load_task_dependencies_for_session,
+)
 from curator.state.evidence import (
     insert_evidence_ref,
     load_evidence_refs,
@@ -85,6 +92,11 @@ from curator.state.sessions import (
 from curator.state.tasks import insert_task, load_tasks_for_session
 
 __all__ = [
+    "insert_execution",
+    "insert_task_dependency",
+    "load_executions_for_run",
+    "load_executions_for_task",
+    "load_task_dependencies_for_session",
     "insert_event",
     "insert_evidence_ref",
     "insert_approval_decision",
