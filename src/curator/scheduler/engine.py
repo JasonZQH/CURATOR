@@ -25,6 +25,7 @@ from curator.core.schema import (
     CompiledLoopPlan,
     CompiledLoopStep,
     EventRecord,
+    ExecutionRecord,
     EvidenceRef,
     HarnessRunResult,
     HarnessRunSpec,
@@ -81,6 +82,7 @@ from curator.scheduler.ids import (
 )
 from curator.scheduler.session_factory import build_workflow_session_records
 from curator.scheduler.step_writer import (
+    step_completed_event_id,
     write_loop_completion,
     write_loop_pause,
     write_step_events,
@@ -88,6 +90,7 @@ from curator.scheduler.step_writer import (
 )
 from curator.state.repositories import (
     insert_event,
+    insert_execution,
     insert_evidence_ref,
     insert_loop_decision,
     insert_loop_iteration,
@@ -97,6 +100,8 @@ from curator.state.repositories import (
     insert_role_selection,
     insert_session,
     insert_task,
+    insert_task_dependency,
+    load_executions_for_task,
     load_loop_runs_for_session,
     load_session,
     load_tasks_for_session,
@@ -332,6 +337,8 @@ def create_workflow_session(
         insert_loop_run(connection, skeleton.loop_run)
         for selection in skeleton.role_selections:
             insert_role_selection(connection, selection)
+        for dependency in skeleton.dependencies:
+            insert_task_dependency(connection, dependency)
     return skeleton.session.id
 
 
@@ -353,6 +360,64 @@ def _retry_target_step(
                 return candidate
 
     return _retry_implementation_step(plan)
+
+
+def _begin_execution(
+    ctx: LoopExecutionContext,
+    task_id: str,
+    iteration_id: str,
+    step: CompiledLoopStep,
+    started_at: datetime,
+) -> ExecutionRecord:
+    """Open a new immutable attempt at one task and persist it as running.
+
+    The attempt number and the parent link are read off the attempts already on the
+    ledger, never off in-memory counters — that is what makes a resumed loop continue the
+    lineage instead of starting a second one from attempt 1.
+    """
+    prior = load_executions_for_task(ctx.connection, ctx.loop_run.id, task_id)
+    execution = ExecutionRecord(
+        id=f"execution-{iteration_id}",
+        session_id=ctx.session.id,
+        loop_run_id=ctx.loop_run.id,
+        task_id=task_id,
+        iteration_id=iteration_id,
+        attempt=len(prior) + 1,
+        parent_execution_id=prior[-1].id if prior else None,
+        status=HarnessStatus.RUNNING,
+        started_at=started_at,
+        metadata={
+            "step_id": step.id,
+            "step_type": step.step_type.value,
+            "parent_iteration_id": prior[-1].iteration_id if prior else None,
+        },
+    )
+    insert_execution(ctx.connection, execution)
+    return execution
+
+
+def _cause_of(execution: ExecutionRecord) -> str | None:
+    """Return the event that led to this attempt, or None for a first attempt.
+
+    A retry happens because the previous attempt finished the way it did, so the previous
+    attempt's completion event is its cause. First attempts have no cause on the ledger.
+    """
+    if execution.parent_execution_id is None or execution.metadata.get("parent_iteration_id") is None:
+        return None
+    return step_completed_event_id(str(execution.metadata["parent_iteration_id"]))
+
+
+def _finish_execution(
+    ctx: LoopExecutionContext,
+    execution: ExecutionRecord,
+    status: HarnessStatus,
+    completed_at: datetime,
+) -> None:
+    """Close one attempt. Only the terminal fields move; its identity is already fixed."""
+    insert_execution(
+        ctx.connection,
+        execution.model_copy(update={"status": status, "completed_at": completed_at}),
+    )
 
 
 RETRY_TARGET_METADATA_KEY = "retry_target_task_id"
@@ -674,6 +739,9 @@ def _execute_human_gate_step(
         completed_at=now,
     )
     insert_loop_iteration(connection, iteration)
+    _finish_execution(
+        ctx, _begin_execution(ctx, task_id, iteration.id, step, now), iteration.status, now
+    )
     summary = (
         ctx.goal_contract.summary if ctx.goal_contract is not None else step.task_title
     )
@@ -773,6 +841,7 @@ def _execute_verifier_step(
         completed_at=None,
     )
     insert_loop_iteration(connection, iteration)
+    execution = _begin_execution(ctx, task_id, iteration.id, step, started_at)
 
     spec = VerificationSpec(
         project_root=Path(ctx.session.project_root),
@@ -843,6 +912,7 @@ def _execute_verifier_step(
         metadata=_retry_metadata(retry_step),
     )
     insert_loop_iteration(connection, iteration)
+    _finish_execution(ctx, execution, iteration.status, completed_at)
     insert_loop_decision(connection, decision)
     record_decision_memory(
         connection,
@@ -865,7 +935,13 @@ def _execute_verifier_step(
         ),
     )
     write_step_events(
-        connection, ctx.session.id, task_id, iteration.id, step.step_type, completed_at
+        connection,
+        ctx.session.id,
+        task_id,
+        iteration.id,
+        step.step_type,
+        completed_at,
+        caused_by=_cause_of(execution),
     )
     write_step_message(
         connection,
@@ -927,6 +1003,7 @@ async def _execute_provider_step(
         completed_at=None,
     )
     insert_loop_iteration(connection, iteration)
+    execution = _begin_execution(ctx, task_id, iteration.id, step, step_started_at)
     context_package = build_context_package(
         connection,
         session_id=ctx.session.id,
@@ -1064,6 +1141,7 @@ async def _execute_provider_step(
     )
 
     insert_loop_iteration(connection, iteration)
+    _finish_execution(ctx, execution, iteration.status, step_completed_at)
     provider_failed = provider_error is not None or (
         result is not None and result.status is HarnessStatus.FAILED
     )
@@ -1121,7 +1199,13 @@ async def _execute_provider_step(
         ),
     )
     write_step_events(
-        connection, ctx.session.id, task_id, iteration.id, step_type, step_completed_at
+        connection,
+        ctx.session.id,
+        task_id,
+        iteration.id,
+        step_type,
+        step_completed_at,
+        caused_by=_cause_of(execution),
     )
     if result is not None:
         write_step_message(

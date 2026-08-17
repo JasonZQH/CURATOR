@@ -103,9 +103,19 @@ def _ensure_memory_entry_learning_columns(connection: sqlite3.Connection) -> Non
         connection.execute("alter table memory_entries add column updated_at text")
 
 
+def _ensure_event_causation_column(connection: sqlite3.Connection) -> None:
+    """Add the event causation link to ledgers created before it existed."""
+    columns = {
+        row["name"] for row in connection.execute("pragma table_info(events)").fetchall()
+    }
+    if "causation_id" not in columns:
+        connection.execute("alter table events add column causation_id text")
+
+
 VERSIONED_MIGRATIONS: tuple[tuple[int, Callable[[sqlite3.Connection], None]], ...] = (
     (1, _ensure_provider_run_identity_columns),
     (2, _ensure_memory_entry_learning_columns),
+    (3, _ensure_event_causation_column),
 )
 
 

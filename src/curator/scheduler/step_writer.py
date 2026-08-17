@@ -20,6 +20,15 @@ def message_type_for_step(step_type: LoopStepType) -> MessageType:
     return message_types[step_type]
 
 
+def step_completed_event_id(iteration_id: str) -> str:
+    """Return the id of the completion event for one iteration.
+
+    Named rather than inlined because the next attempt cites it as its cause, and a
+    causal chain that depends on two places agreeing on a string format is not a chain.
+    """
+    return f"event-{iteration_id}-completed"
+
+
 def write_step_events(
     connection: sqlite3.Connection,
     session_id: str,
@@ -27,28 +36,38 @@ def write_step_events(
     iteration_id: str,
     step_type: LoopStepType,
     created_at: datetime,
+    caused_by: str | None = None,
 ) -> None:
-    """Persist start and completion events for one scheduler step."""
+    """Persist start and completion events for one scheduler step.
+
+    `caused_by` is the event that led to this step running — for a retry, the completion
+    event of the attempt it replaces. That chain is event causality and nothing else:
+    which attempt superseded which is execution lineage, and which task blocks which is
+    the dependency graph. Replay follows this one.
+    """
+    started_id = f"event-{iteration_id}-started"
     insert_event(
         connection,
         EventRecord(
-            id=f"event-{iteration_id}-started",
+            id=started_id,
             session_id=session_id,
             task_id=task_id,
             type=EventType.TASK_STARTED,
             created_at=created_at,
             payload={"iteration_id": iteration_id, "step": step_type.value},
+            causation_id=caused_by,
         ),
     )
     insert_event(
         connection,
         EventRecord(
-            id=f"event-{iteration_id}-completed",
+            id=step_completed_event_id(iteration_id),
             session_id=session_id,
             task_id=task_id,
             type=EventType.TASK_COMPLETED,
             created_at=created_at,
             payload={"iteration_id": iteration_id, "step": step_type.value},
+            causation_id=started_id,
         ),
     )
 

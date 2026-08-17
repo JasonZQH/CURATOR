@@ -130,6 +130,49 @@ class LoopIterationRecord(CuratorModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class ExecutionRecord(CuratorModel):
+    """Describe one attempt at one task.
+
+    A retry is a new record pointing at the attempt it replaces, never a counter bumped in
+    place, so a failed attempt keeps its own identity and the evidence it produced stays
+    attached to the attempt that produced it. `attempt` and `parent_execution_id` are
+    derived from the rows already on the ledger rather than from memory, which is what
+    makes them survive a resume.
+
+    Identity — id, attempt, parent_execution_id, started_at — is written once and never
+    changes; only the terminal status and completion time are filled in later.
+    """
+
+    id: str
+    session_id: str
+    loop_run_id: str
+    task_id: str
+    status: HarnessStatus
+    started_at: datetime
+    attempt: int = 1
+    iteration_id: str | None = None
+    # Execution lineage only: which attempt this one replaces. Not task dependency
+    # (TaskDependencyRecord) and not event causality (EventRecord.causation_id).
+    parent_execution_id: str | None = None
+    completed_at: datetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class TaskDependencyRecord(CuratorModel):
+    """Describe one edge of the business dependency graph.
+
+    The ready queue reads this and nothing else: an edge here means `task_id` cannot start
+    until `depends_on_task_id` is done.
+    """
+
+    id: str
+    session_id: str
+    task_id: str
+    depends_on_task_id: str
+    created_at: datetime
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class LoopDecisionRecord(CuratorModel):
     """Describe one scheduler-owned decision after a loop iteration."""
 

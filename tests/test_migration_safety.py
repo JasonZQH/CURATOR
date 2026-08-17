@@ -43,13 +43,26 @@ def _schema_rows(connection):
     ]
 
 
-def _add_migration(monkeypatch, version, migration):
-    """Append one migration to the registry for the duration of a test."""
+def _shipped_versions() -> tuple[int, ...]:
+    """Return the migration versions this build actually ships."""
+    from curator.state.db import VERSIONED_MIGRATIONS
+
+    return tuple(version for version, _ in VERSIONED_MIGRATIONS)
+
+
+def _add_migration(monkeypatch, migration) -> int:
+    """Append one migration after the shipped ones and return its version.
+
+    The version is derived rather than written down so these tests keep testing the
+    mechanism instead of colliding with the next real migration to land.
+    """
     from curator.state import db
 
+    version = max(_shipped_versions()) + 1
     monkeypatch.setattr(
         db, "VERSIONED_MIGRATIONS", (*db.VERSIONED_MIGRATIONS, (version, migration))
     )
+    return version
 
 
 def test_a_fresh_ledger_is_not_backed_up(tmp_path):
@@ -58,7 +71,7 @@ def test_a_fresh_ledger_is_not_backed_up(tmp_path):
 
     outcome = initialize_database(connection)
 
-    assert outcome is not None and outcome.applied == (1, 2)
+    assert outcome is not None and outcome.applied == _shipped_versions()
     assert outcome.backup is None
     assert _backups(tmp_path) == []
     connection.close()
@@ -80,16 +93,15 @@ def test_a_pending_migration_backs_the_ledger_up_first(tmp_path, monkeypatch):
     """Verify an existing ledger is copied aside before a new migration touches it."""
     connection = _open(tmp_path)
     initialize_database(connection)
-    _add_migration(
+    added = _add_migration(
         monkeypatch,
-        3,
         lambda conn: conn.execute("alter table memory_entries add column probe text"),
     )
 
     outcome = initialize_database(connection)
 
-    assert outcome is not None and outcome.applied == (3,)
-    assert outcome.from_version == 2 and outcome.to_version == 3
+    assert outcome is not None and outcome.applied == (added,)
+    assert outcome.from_version == added - 1 and outcome.to_version == added
     assert outcome.backup is not None and outcome.backup.exists()
     assert _backups(tmp_path) == [outcome.backup]
 
@@ -113,7 +125,7 @@ def test_a_failed_migration_leaves_the_ledger_untouched(tmp_path, monkeypatch):
         conn.execute("alter table memory_entries add column half_applied text")
         raise RuntimeError("migration exploded")
 
-    _add_migration(monkeypatch, 3, _doomed)
+    _add_migration(monkeypatch, _doomed)
 
     with pytest.raises(CuratorStateError):
         initialize_database(connection)
@@ -155,7 +167,7 @@ def test_pending_migrations_treats_a_ledger_without_schema_version_as_unmigrated
     """Verify a ledger predating the schema_version table is migratable, not an error."""
     connection = _open(tmp_path)
 
-    assert pending_migrations(connection) == [1, 2]  # no schema_version table exists yet
+    assert pending_migrations(connection) == list(_shipped_versions())  # no schema_version table yet
     connection.close()
 
 
@@ -166,17 +178,17 @@ def test_doctor_reports_pending_migrations_without_applying_them(tmp_path, monke
     before = _schema_rows(connection)
     connection.close()
 
-    _add_migration(monkeypatch, 3, lambda conn: conn.execute("select 1"))
+    added = _add_migration(monkeypatch, lambda conn: conn.execute("select 1"))
 
     report = inspect_project_health(tmp_path)
     inspect_project_health(tmp_path)
 
     assert report.checks["migrations"].status == "pending"
-    assert "3" in report.checks["migrations"].detail
+    assert str(added) in report.checks["migrations"].detail
 
     connection = _open(tmp_path)
     assert _schema_rows(connection) == before
-    assert pending_migrations(connection) == [3]
+    assert pending_migrations(connection) == [added]
     connection.close()
 
 
@@ -184,7 +196,7 @@ def test_doctor_points_at_the_newest_backup_with_a_restore_command(tmp_path, mon
     """Verify recovery never requires remembering a timestamp."""
     connection = _open(tmp_path)
     initialize_database(connection)
-    _add_migration(monkeypatch, 3, lambda conn: conn.execute("select 1"))
+    _add_migration(monkeypatch, lambda conn: conn.execute("select 1"))
     outcome = initialize_database(connection)
     connection.close()
 

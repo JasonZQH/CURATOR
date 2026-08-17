@@ -122,6 +122,7 @@ def test_database_initializes_phase0_tables(tmp_path):
         "discussion_turns",
         "events",
         "evidence_refs",
+        "executions",
         "goal_drafts",
         "goal_revisions",
         "goal_runs",
@@ -142,6 +143,7 @@ def test_database_initializes_phase0_tables(tmp_path):
         "role_selections",
         "schema_version",
         "sessions",
+        "task_dependencies",
         "tasks",
         "work_items",
     ]
@@ -735,7 +737,8 @@ def test_database_initializes_schema_version_and_indexes(tmp_path):
         row["version"]
         for row in connection.execute("select version from schema_version order by version")
     ]
-    assert versions == [1, 2]
+    # Pinned on purpose: every new migration must land here deliberately, not by accident.
+    assert versions == [1, 2, 3]
 
     index_names = {
         row["name"]
@@ -755,7 +758,7 @@ def test_database_initializes_schema_version_and_indexes(tmp_path):
         row["version"]
         for row in connection.execute("select version from schema_version order by version")
     ]
-    assert repeat_versions == [1, 2]
+    assert repeat_versions == [1, 2, 3]
 
 
 def test_database_initialization_upgrades_legacy_memory_entries_table(tmp_path):
