@@ -6,6 +6,29 @@ All notable changes to Curator are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Curator's own state is off limits to a run, and tampering is caught.** `.curator/`
+  holds the role contracts, the loop templates, and the ledger, and it sits inside the one
+  writable root a provider is given — while being invisible to every diff-based check
+  (the repo gitignores it, `curator init` writes `.curator/.gitignore` with `*`, and the
+  workspace guard filters it out of git porcelain). A provider that rewrote its own
+  contract therefore left no trace. Three layers now cover it: Claude Code is denied those
+  paths at the argv layer, `ActionPolicy` carves `.curator` out of the writable root for
+  in-process callers, and the contract files are hashed around every dispatch — if they
+  move while a provider is running, the loop pauses for a human and **that step's evidence
+  is refused**. The hash check is the only one of the three that works on the Codex seat,
+  which has no way to deny a subpath of the root it can write.
+
+### Changed
+- **Provider permissions are default-deny.** The check named the read-only slots, so any
+  slot that was not literally `reviewer` or `maindeck` — a typo, a slot added by a later
+  version, or the `None` a step compiles with when it declares no slot — fell through to
+  workspace-write. It is now an allowlist: only the `writer` slot may write, everything
+  else is read-only on both providers.
+- **The writer gets named git verbs instead of `Bash(git *)`.** The wildcard also granted
+  `git config`, `git checkout`, and `git worktree`, and left the `git push` denial resting
+  on prefix matching alone.
+
 ### Fixed
 - **Every evidence kind now carries a real digest.** Ordinary provider output was recorded
   with `content_hash` set to `sha256:<run id>:<kind>` — a string shaped like a digest that

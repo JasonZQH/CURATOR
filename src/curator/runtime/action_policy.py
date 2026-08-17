@@ -36,12 +36,23 @@ class ActionPolicy(CuratorModel):
     project_root: Path
     readable_roots: list[Path] = Field(default_factory=list)
     writable_roots: list[Path] = Field(default_factory=list)
+    denied_roots: list[Path] = Field(default_factory=list)
 
     @classmethod
     def for_project(cls, project_root: Path | str) -> "ActionPolicy":
-        """Build the default local action policy for a project."""
+        """Build the default local action policy for a project.
+
+        `.curator` is carved out of the writable root rather than left inside it: it holds
+        the role contracts, loop templates, and the ledger itself, so an action that can
+        write there can rewrite the rules it is judged by.
+        """
         root = Path(project_root).resolve()
-        return cls(project_root=root, readable_roots=[root], writable_roots=[root])
+        return cls(
+            project_root=root,
+            readable_roots=[root],
+            writable_roots=[root],
+            denied_roots=[root / ".curator"],
+        )
 
     def evaluate(self, request: ActionRequest) -> ActionDecision:
         """Evaluate one action request against this policy."""
@@ -155,6 +166,14 @@ class ActionPolicy(CuratorModel):
             )
 
         target = Path(request.target).expanduser().resolve()
+        # Denied before allowed: the governance carve-out sits inside the writable root, so
+        # a containment test alone would report it as permitted.
+        if any(target == root or root in target.parents for root in self.denied_roots):
+            return ActionDecision(
+                allowed=False,
+                handoff_required=True,
+                reason=f"{label} target is Curator's own state and is not writable by a run.",
+            )
         if any(target == root or root in target.parents for root in roots):
             return ActionDecision(allowed=True, reason=f"{label} is within project policy.")
 
